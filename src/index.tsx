@@ -31,6 +31,7 @@ async function ensureDB(db: D1Database) {
       teacher_id INTEGER NOT NULL,
       category_id INTEGER,
       progress INTEGER DEFAULT 0 CHECK(progress >= 0 AND progress <= 100),
+      status TEXT DEFAULT 'working',
       due_date TEXT,
       is_private INTEGER DEFAULT 0,
       is_approved INTEGER DEFAULT 0,
@@ -43,8 +44,21 @@ async function ensureDB(db: D1Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       todo_id INTEGER NOT NULL,
       content TEXT NOT NULL,
+      author_type TEXT DEFAULT 'admin',
+      author_name TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS frequent_phrases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phrase TEXT NOT NULL UNIQUE,
+      use_count INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`)
   ])
 }
@@ -52,7 +66,7 @@ async function ensureDB(db: D1Database) {
 // ===== Auth API =====
 app.post('/api/auth/login', async (c) => {
   const { password } = await c.req.json()
-  if (password === '0000') {
+  if (password === '13579') {
     return c.json({ success: true, role: 'user' })
   }
   if (password === '1026') {
@@ -116,6 +130,42 @@ app.delete('/api/categories/:id', async (c) => {
   return c.json({ success: true })
 })
 
+// ===== Settings API =====
+app.get('/api/settings/:key', async (c) => {
+  await ensureDB(c.env.DB)
+  const key = c.req.param('key')
+  const row = await c.env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first()
+  return c.json({ value: row?.value || '' })
+})
+
+app.put('/api/settings/:key', async (c) => {
+  await ensureDB(c.env.DB)
+  const key = c.req.param('key')
+  const { value } = await c.req.json()
+  await c.env.DB.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))').bind(key, value).run()
+  return c.json({ success: true })
+})
+
+// ===== Frequent Phrases API =====
+app.get('/api/phrases', async (c) => {
+  await ensureDB(c.env.DB)
+  const { results } = await c.env.DB.prepare('SELECT * FROM frequent_phrases ORDER BY use_count DESC, created_at DESC LIMIT 20').all()
+  return c.json(results)
+})
+
+app.post('/api/phrases', async (c) => {
+  await ensureDB(c.env.DB)
+  const { phrase } = await c.req.json()
+  // Try to increment use_count if exists, otherwise insert
+  const existing = await c.env.DB.prepare('SELECT id FROM frequent_phrases WHERE phrase = ?').bind(phrase).first()
+  if (existing) {
+    await c.env.DB.prepare('UPDATE frequent_phrases SET use_count = use_count + 1 WHERE phrase = ?').bind(phrase).run()
+  } else {
+    await c.env.DB.prepare('INSERT INTO frequent_phrases (phrase) VALUES (?)').bind(phrase).run()
+  }
+  return c.json({ success: true })
+})
+
 // ===== Todos API =====
 app.get('/api/todos', async (c) => {
   await ensureDB(c.env.DB)
@@ -124,6 +174,7 @@ app.get('/api/todos', async (c) => {
   const period = c.req.query('period') || 'all'
   const teacherId = c.req.query('teacher_id') || ''
   const categoryId = c.req.query('category_id') || ''
+  const statusFilter = c.req.query('status') || ''
 
   let query = `
     SELECT t.*, 
@@ -158,6 +209,18 @@ app.get('/api/todos', async (c) => {
     bindings.push(categoryId)
   }
 
+  if (statusFilter) {
+    if (statusFilter === 'completed') {
+      query += " AND t.status = 'completed'"
+    } else if (statusFilter === 'working') {
+      query += " AND t.status = 'working'"
+    } else if (statusFilter === 'reported') {
+      query += " AND t.status = 'reported'"
+    } else if (statusFilter === 'hold') {
+      query += " AND t.status = 'hold'"
+    }
+  }
+
   if (period === 'day') {
     query += " AND t.due_date = date('now')"
   } else if (period === 'week') {
@@ -180,14 +243,15 @@ app.post('/api/todos', async (c) => {
   const body = await c.req.json()
   await ensureDB(c.env.DB)
   const result = await c.env.DB.prepare(
-    'INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).bind(
     body.title,
     body.description || '',
     body.teacher_id,
     body.category_id || null,
     body.progress || 0,
-    body.due_date || null
+    body.due_date || null,
+    body.status || 'working'
   ).run()
   return c.json({ id: result.meta.last_row_id, ...body })
 })
@@ -204,6 +268,7 @@ app.put('/api/todos/:id', async (c) => {
   if (body.teacher_id !== undefined) { sets.push('teacher_id = ?'); vals.push(body.teacher_id) }
   if (body.category_id !== undefined) { sets.push('category_id = ?'); vals.push(body.category_id) }
   if (body.progress !== undefined) { sets.push('progress = ?'); vals.push(body.progress) }
+  if (body.status !== undefined) { sets.push('status = ?'); vals.push(body.status) }
   if (body.due_date !== undefined) { sets.push('due_date = ?'); vals.push(body.due_date) }
   if (body.is_private !== undefined) { sets.push('is_private = ?'); vals.push(body.is_private ? 1 : 0) }
   if (body.is_approved !== undefined) { sets.push('is_approved = ?'); vals.push(body.is_approved ? 1 : 0) }
@@ -221,21 +286,34 @@ app.delete('/api/todos/:id', async (c) => {
   return c.json({ success: true })
 })
 
-// ===== Comments API =====
+// ===== Comments API (now supports both admin & user messages) =====
 app.get('/api/todos/:id/comments', async (c) => {
   const todoId = c.req.param('id')
   const { results } = await c.env.DB.prepare(
-    'SELECT * FROM comments WHERE todo_id = ? ORDER BY created_at DESC'
+    'SELECT * FROM comments WHERE todo_id = ? ORDER BY created_at ASC'
   ).bind(todoId).all()
   return c.json(results)
 })
 
 app.post('/api/todos/:id/comments', async (c) => {
   const todoId = c.req.param('id')
-  const { content } = await c.req.json()
+  const { content, author_type, author_name } = await c.req.json()
   const result = await c.env.DB.prepare(
-    'INSERT INTO comments (todo_id, content) VALUES (?, ?)'
-  ).bind(todoId, content).run()
+    'INSERT INTO comments (todo_id, content, author_type, author_name) VALUES (?, ?, ?, ?)'
+  ).bind(todoId, content, author_type || 'admin', author_name || '').run()
+
+  // Save phrase for auto-complete
+  if (content && content.length >= 5) {
+    try {
+      const existing = await c.env.DB.prepare('SELECT id FROM frequent_phrases WHERE phrase = ?').bind(content).first()
+      if (existing) {
+        await c.env.DB.prepare('UPDATE frequent_phrases SET use_count = use_count + 1 WHERE phrase = ?').bind(content).run()
+      } else {
+        await c.env.DB.prepare('INSERT INTO frequent_phrases (phrase) VALUES (?)').bind(content).run()
+      }
+    } catch(e) {}
+  }
+
   return c.json({ id: result.meta.last_row_id, todo_id: todoId, content })
 })
 
@@ -253,15 +331,17 @@ app.get('/api/stats', async (c) => {
   let whereClause = isAdmin ? '' : 'WHERE is_private = 0'
 
   const total = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause}`).first()
-  const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} progress > 0 AND progress < 100`).first()
-  const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} progress = 100 AND is_approved = 0`).first()
-  const avgProgress = await c.env.DB.prepare(`SELECT AVG(progress) as avg FROM todos ${whereClause}`).first()
+  const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'working'`).first()
+  const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'reported'`).first()
+
+  // Get motto
+  const motto = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'admin_motto'").first()
 
   return c.json({
     total: total?.count || 0,
     inProgress: inProgress?.count || 0,
     waitingApproval: waitingApproval?.count || 0,
-    avgProgress: Math.round(Number(avgProgress?.avg || 0))
+    motto: motto?.value || ''
   })
 })
 
@@ -269,7 +349,6 @@ app.get('/api/stats', async (c) => {
 app.post('/api/seed', async (c) => {
   await ensureDB(c.env.DB)
   
-  // Check if data already exists
   const existing = await c.env.DB.prepare('SELECT COUNT(*) as count FROM teachers').first()
   if (existing && Number(existing.count) > 0) {
     return c.json({ message: 'Data already seeded' })
@@ -292,14 +371,25 @@ app.post('/api/seed', async (c) => {
   ])
 
   await c.env.DB.batch([
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('2026 교육과정 편성안 작성', '학년별 교육과정 편성안을 작성하고 검토합니다.', 1, 3, 75, '2026-04-15')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('창의적 체험활동 계획서', '1학기 창체 활동 세부 계획을 수립합니다.', 2, 2, 40, '2026-04-10')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('학부모 총회 준비', '학부모 총회 자료 및 발표 준비를 합니다.', 3, 1, 100, '2026-03-28')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('교원 연수 일정 수립', '상반기 교원 연수 일정을 확정합니다.', 4, 5, 20, '2026-04-05')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('예산 집행 현황 정리', '1분기 예산 집행 현황을 정리합니다.', 5, 4, 60, '2026-04-20')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('학교 홈페이지 업데이트', '최신 공지사항 및 갤러리를 업데이트합니다.', 1, 4, 30, '2026-03-30')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('방과후학교 프로그램 기획', '2학기 방과후학교 프로그램을 기획합니다.', 2, 1, 10, '2026-05-01')"),
-    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date) VALUES ('안전교육 실시 보고서', '3월 안전교육 실시 결과를 보고합니다.', 3, 3, 90, '2026-03-31')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('2026 교육과정 편성안 작성', '학년별 교육과정 편성안을 작성하고 검토합니다.', 1, 3, 75, '2026-04-15', 'working')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('창의적 체험활동 계획서', '1학기 창체 활동 세부 계획을 수립합니다.', 2, 2, 40, '2026-04-10', 'working')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('학부모 총회 준비', '학부모 총회 자료 및 발표 준비를 합니다.', 3, 1, 100, '2026-03-28', 'reported')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('교원 연수 일정 수립', '상반기 교원 연수 일정을 확정합니다.', 4, 5, 20, '2026-04-05', 'working')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('예산 집행 현황 정리', '1분기 예산 집행 현황을 정리합니다.', 5, 4, 60, '2026-04-20', 'working')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('학교 홈페이지 업데이트', '최신 공지사항 및 갤러리를 업데이트합니다.', 1, 4, 30, '2026-03-30', 'hold')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('방과후학교 프로그램 기획', '2학기 방과후학교 프로그램을 기획합니다.', 2, 1, 10, '2026-05-01', 'working')"),
+    c.env.DB.prepare("INSERT INTO todos (title, description, teacher_id, category_id, progress, due_date, status) VALUES ('안전교육 실시 보고서', '3월 안전교육 실시 결과를 보고합니다.', 3, 3, 90, '2026-03-31', 'working')"),
+  ])
+
+  await c.env.DB.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_motto', '함께 성장하는 우리 부서, 오늘도 화이팅!')").run()
+
+  // Seed some frequent phrases
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT OR IGNORE INTO frequent_phrases (phrase, use_count) VALUES ('확인했습니다. 수고하셨습니다.', 5)"),
+    c.env.DB.prepare("INSERT OR IGNORE INTO frequent_phrases (phrase, use_count) VALUES ('진행 상황 공유 부탁드립니다.', 3)"),
+    c.env.DB.prepare("INSERT OR IGNORE INTO frequent_phrases (phrase, use_count) VALUES ('기한 내 완료 부탁드립니다.', 3)"),
+    c.env.DB.prepare("INSERT OR IGNORE INTO frequent_phrases (phrase, use_count) VALUES ('검토 완료했습니다. 진행해 주세요.', 2)"),
+    c.env.DB.prepare("INSERT OR IGNORE INTO frequent_phrases (phrase, use_count) VALUES ('수정 사항이 있습니다. 확인해 주세요.', 2)"),
   ])
 
   return c.json({ message: 'Seed data inserted successfully' })
@@ -311,7 +401,6 @@ app.get('/', async (c) => {
 })
 
 app.get('*', async (c) => {
-  // Serve static files or fallback to SPA
   const path = c.req.path
   if (path.startsWith('/api/')) {
     return c.json({ error: 'Not found' }, 404)
@@ -337,7 +426,6 @@ function getIndexHTML(): string {
           colors: {
             mint: { 50:'#f0fdfa', 100:'#ccfbf1', 200:'#99f6e4', 300:'#5eead4', 400:'#2dd4bf', 500:'#14b8a6', 600:'#0d9488', 700:'#0f766e', 800:'#115e59', 900:'#134e4a' },
             peach: { 50:'#fff7ed', 100:'#ffedd5', 200:'#fed7aa', 300:'#fdba74' },
-            slate2: { 50:'#f8fafc', 100:'#f1f5f9', 200:'#e2e8f0' }
           }
         }
       }
@@ -352,19 +440,14 @@ function getIndexHTML(): string {
     .fade-in { animation: fadeIn 0.3s ease-in; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
     .slider-bg { background: linear-gradient(to right, #99f6e4 0%, #14b8a6 50%, #0d9488 100%); }
-    .dark .card-bg { background-color: #1e293b; }
-    .dark body { background-color: #0f172a; color: #e2e8f0; }
     .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); }
     .tooltip { position: relative; }
     .tooltip:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; z-index: 50; }
-    @media (max-width: 768px) {
-      .mobile-title::after { content: 'TDL'; }
-      .mobile-title span { display: none; }
-      .desktop-title { display: none; }
-    }
-    @media (min-width: 769px) {
-      .mobile-title::after { content: none; }
-    }
+    .phrase-dropdown { position: absolute; bottom: 100%; left: 0; right: 0; max-height: 160px; overflow-y: auto; z-index: 60; }
+    .chat-bubble-admin { background: #ccfbf1; border-radius: 12px 12px 12px 2px; }
+    .chat-bubble-user { background: #e0e7ff; border-radius: 12px 12px 2px 12px; }
+    .dark .chat-bubble-admin { background: #134e4a; }
+    .dark .chat-bubble-user { background: #312e81; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen transition-colors duration-300">
@@ -390,7 +473,6 @@ function getIndexHTML(): string {
           <i class="fas fa-sign-in-alt mr-2"></i>로그인
         </button>
         <p id="loginError" class="text-red-500 text-sm text-center hidden"></p>
-        <p class="text-xs text-gray-400 text-center">일반: 0000 / 관리자: 1026</p>
       </div>
     </div>
   </div>
@@ -414,11 +496,20 @@ function getIndexHTML(): string {
             </div>
           </div>
           
-          <div class="flex items-center space-x-2 sm:space-x-3">
+          <div class="flex items-center space-x-1 sm:space-x-2">
+            <!-- Completed Filter Button -->
+            <button id="completedFilterBtn" onclick="toggleCompletedFilter()" class="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1" data-tip="완료 항목만 보기">
+              <i class="fas fa-check-circle"></i>
+              <span class="hidden sm:inline">완료</span>
+            </button>
+            <!-- Dark Mode -->
+            <button onclick="toggleDarkMode()" class="p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="다크모드">
+              <i id="darkModeIcon" class="fas fa-moon"></i>
+            </button>
             <!-- Search -->
             <div class="relative hidden sm:block">
               <input id="searchInput" type="text" placeholder="검색..." 
-                class="bg-white/20 text-white placeholder-white/60 px-4 py-2 rounded-lg text-sm w-48 focus:w-64 transition-all focus:bg-white/30 outline-none"
+                class="bg-white/20 text-white placeholder-white/60 px-4 py-2 rounded-lg text-sm w-40 focus:w-56 transition-all focus:bg-white/30 outline-none"
                 oninput="handleSearch()">
               <i class="fas fa-search absolute right-3 top-2.5 text-white/60 text-sm"></i>
             </div>
@@ -426,13 +517,9 @@ function getIndexHTML(): string {
             <button onclick="toggleMobileSearch()" class="sm:hidden p-2 hover:bg-white/20 rounded-lg transition">
               <i class="fas fa-search"></i>
             </button>
-            <!-- Dark Mode -->
-            <button onclick="toggleDarkMode()" class="p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="다크모드">
-              <i id="darkModeIcon" class="fas fa-moon"></i>
-            </button>
             <!-- Admin Badge -->
-            <span id="adminBadge" class="hidden bg-yellow-400 text-yellow-900 px-3 py-1 rounded-full text-xs font-bold">
-              <i class="fas fa-shield-alt mr-1"></i>관리자
+            <span id="adminBadge" class="hidden bg-yellow-400 text-yellow-900 px-2 py-1 rounded-full text-xs font-bold">
+              <i class="fas fa-shield-alt mr-1"></i><span class="hidden sm:inline">관리자</span>
             </span>
             <!-- Admin Toggle -->
             <button id="adminToggleBtn" onclick="showAdminLogin()" class="p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="관리자 모드">
@@ -456,7 +543,7 @@ function getIndexHTML(): string {
     <!-- Dashboard Content -->
     <div class="max-w-7xl mx-auto px-4 py-6">
       
-      <!-- Summary Cards -->
+      <!-- Summary Cards (3 cards + motto card) -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div class="bg-mint-50 border border-mint-100 rounded-2xl p-5 hover:shadow-lg transition-shadow dark:bg-slate-800 dark:border-slate-700">
           <div class="flex items-center justify-between mb-3">
@@ -476,27 +563,27 @@ function getIndexHTML(): string {
             <span class="text-xs text-orange-600 font-medium bg-orange-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-orange-400">진행</span>
           </div>
           <p id="statInProgress" class="text-3xl font-bold text-gray-800 dark:text-white">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">진행 중</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">작업 중</p>
         </div>
         <div class="bg-gray-50 border border-gray-200 rounded-2xl p-5 hover:shadow-lg transition-shadow dark:bg-slate-800 dark:border-slate-700">
           <div class="flex items-center justify-between mb-3">
             <div class="w-10 h-10 bg-gray-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-hourglass-half text-gray-600"></i>
+              <i class="fas fa-flag-checkered text-gray-600"></i>
             </div>
-            <span class="text-xs text-gray-600 font-medium bg-gray-200 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-gray-400">대기</span>
+            <span class="text-xs text-gray-600 font-medium bg-gray-200 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-gray-400">보고</span>
           </div>
           <p id="statWaiting" class="text-3xl font-bold text-gray-800 dark:text-white">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">완료 대기</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">관리자 보고(완)</p>
         </div>
-        <div class="bg-blue-50 border border-blue-100 rounded-2xl p-5 hover:shadow-lg transition-shadow dark:bg-slate-800 dark:border-slate-700">
+        <!-- Motto Card -->
+        <div class="bg-blue-50 border border-blue-100 rounded-2xl p-5 hover:shadow-lg transition-shadow dark:bg-slate-800 dark:border-slate-700 col-span-2 lg:col-span-1">
           <div class="flex items-center justify-between mb-3">
             <div class="w-10 h-10 bg-blue-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-chart-pie text-blue-700"></i>
+              <i class="fas fa-quote-left text-blue-700"></i>
             </div>
-            <span class="text-xs text-blue-600 font-medium bg-blue-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-blue-400">진행률</span>
+            <span class="text-xs text-blue-600 font-medium bg-blue-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-blue-400">오늘의 한마디</span>
           </div>
-          <p id="statAvgProgress" class="text-3xl font-bold text-gray-800 dark:text-white">0%</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">평균 진행률</p>
+          <p id="statMotto" class="text-sm font-medium text-gray-700 dark:text-gray-200 leading-relaxed line-clamp-3" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;"></p>
         </div>
       </div>
 
@@ -523,15 +610,13 @@ function getIndexHTML(): string {
           <div class="flex items-center gap-2">
             <button onclick="exportExcel()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
               <i class="fas fa-file-excel mr-1"></i>
-              <span class="hidden sm:inline">엑셀 다운로드</span>
-              <span class="sm:hidden">엑셀</span>
+              <span class="hidden sm:inline">엑셀</span>
             </button>
             <button id="addTodoBtn" onclick="showAddTodoModal()" class="bg-mint-500 hover:bg-mint-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
               <i class="fas fa-plus mr-1"></i>
               <span class="hidden sm:inline">할 일 추가</span>
               <span class="sm:hidden">추가</span>
             </button>
-            <!-- Admin Management Button -->
             <button id="adminMgmtBtn" onclick="showAdminPanel()" class="hidden bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
               <i class="fas fa-users-cog mr-1"></i>
               <span class="hidden sm:inline">관리</span>
@@ -542,7 +627,6 @@ function getIndexHTML(): string {
 
       <!-- Todo List -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
-        <!-- Table Header (Desktop) -->
         <div class="hidden md:grid grid-cols-12 gap-2 px-6 py-3 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider dark:bg-slate-900 dark:border-slate-700 dark:text-gray-400">
           <div class="col-span-1">구분</div>
           <div class="col-span-3">업무명</div>
@@ -552,8 +636,6 @@ function getIndexHTML(): string {
           <div class="col-span-1">상태</div>
           <div class="col-span-2 text-right">작업</div>
         </div>
-        
-        <!-- Todo Items Container -->
         <div id="todoList" class="divide-y divide-gray-50 dark:divide-slate-700">
           <div class="p-8 text-center text-gray-400">
             <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
@@ -584,8 +666,7 @@ function getIndexHTML(): string {
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-gray-600 mb-1 dark:text-gray-300">담당자 *</label>
-              <select id="todoTeacher" class="w-full px-3 py-2 border border-gray-200 rounded-lg dark:bg-slate-700 dark:border-slate-600 dark:text-white">
-              </select>
+              <select id="todoTeacher" class="w-full px-3 py-2 border border-gray-200 rounded-lg dark:bg-slate-700 dark:border-slate-600 dark:text-white"></select>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-600 mb-1 dark:text-gray-300">업무 구분</label>
@@ -637,8 +718,16 @@ function getIndexHTML(): string {
           <i class="fas fa-users-cog text-yellow-500 mr-2"></i>관리자 패널
         </h3>
         
+        <!-- Motto Section -->
+        <div class="mb-6 p-4 bg-blue-50 rounded-xl border border-blue-100 dark:bg-slate-700 dark:border-slate-600">
+          <h4 class="font-semibold text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-quote-left mr-2 text-blue-500"></i>오늘의 한마디 (대시보드 문구)</h4>
+          <div class="flex gap-2">
+            <input id="mottoInput" type="text" placeholder="부서원들에게 전할 문구를 입력하세요..." class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-600 dark:border-slate-500 dark:text-white">
+            <button onclick="saveMotto()" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition"><i class="fas fa-save mr-1"></i>저장</button>
+          </div>
+        </div>
+
         <div class="grid md:grid-cols-2 gap-6">
-          <!-- Teachers Management -->
           <div>
             <h4 class="font-semibold text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-users mr-2 text-mint-500"></i>부서원 관리</h4>
             <div class="flex gap-2 mb-3">
@@ -647,8 +736,6 @@ function getIndexHTML(): string {
             </div>
             <div id="teacherList" class="space-y-2 max-h-48 overflow-y-auto"></div>
           </div>
-          
-          <!-- Categories Management -->
           <div>
             <h4 class="font-semibold text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-tags mr-2 text-mint-500"></i>업무 구분 관리</h4>
             <div class="flex gap-2 mb-3">
@@ -667,27 +754,29 @@ function getIndexHTML(): string {
     </div>
   </div>
 
-  <!-- Comment Modal -->
+  <!-- Chat / Comment Modal (Redesigned as chat) -->
   <div id="commentModal" class="fixed inset-0 z-50 hidden">
     <div class="modal-overlay absolute inset-0" onclick="closeCommentModal()"></div>
     <div class="relative flex items-center justify-center min-h-screen p-4">
-      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto p-6 relative z-10 fade-in dark:bg-slate-800">
-        <h3 class="text-lg font-bold text-gray-800 mb-4 dark:text-white">
-          <i class="fas fa-comments text-mint-500 mr-2"></i>관리자 코멘트
-        </h3>
-        <div id="commentList" class="space-y-3 mb-4 max-h-60 overflow-y-auto"></div>
-        <div id="commentInputArea" class="hidden">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col relative z-10 fade-in dark:bg-slate-800" style="max-height:85vh;">
+        <div class="p-4 border-b border-gray-100 dark:border-slate-700">
+          <h3 class="text-lg font-bold text-gray-800 dark:text-white">
+            <i class="fas fa-comments text-mint-500 mr-2"></i>톡 <span id="chatTodoTitle" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
+          </h3>
+        </div>
+        <div id="commentList" class="flex-1 overflow-y-auto p-4 space-y-3" style="min-height:200px;max-height:400px;"></div>
+        <!-- Chat Input with phrase suggestions -->
+        <div class="p-4 border-t border-gray-100 dark:border-slate-700 relative">
+          <div id="phraseSuggestions" class="phrase-dropdown hidden bg-white dark:bg-slate-700 border border-gray-200 dark:border-slate-600 rounded-lg shadow-lg mb-2">
+          </div>
           <div class="flex gap-2">
-            <input id="commentInput" type="text" placeholder="코멘트 입력..." 
+            <input id="commentInput" type="text" placeholder="메시지 입력..." 
               class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white"
-              onkeydown="if(event.key==='Enter')addComment()">
+              oninput="onChatInput()" onkeydown="if(event.key==='Enter')addComment()">
             <button onclick="addComment()" class="bg-mint-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-mint-600 transition">
               <i class="fas fa-paper-plane"></i>
             </button>
           </div>
-        </div>
-        <div class="flex justify-end mt-4">
-          <button onclick="closeCommentModal()" class="text-gray-500 hover:text-gray-700 font-medium dark:text-gray-300">닫기</button>
         </div>
         <input type="hidden" id="commentTodoId" value="">
       </div>
@@ -702,6 +791,9 @@ function getIndexHTML(): string {
     let todosData = [];
     let teachersData = [];
     let categoriesData = [];
+    let frequentPhrases = [];
+    let completedFilterActive = false;
+    let currentStatusFilter = '';
 
     // ===== Auth =====
     function handleLogin() {
@@ -731,6 +823,7 @@ function getIndexHTML(): string {
       document.getElementById('mainApp').classList.add('hidden');
       document.getElementById('loginScreen').classList.remove('hidden');
       document.getElementById('loginPassword').value = '';
+      document.getElementById('loginError').classList.add('hidden');
     }
 
     function showAdminLogin() {
@@ -748,9 +841,7 @@ function getIndexHTML(): string {
       setTimeout(() => document.getElementById('adminPassword').focus(), 100);
     }
 
-    function closeAdminLogin() {
-      document.getElementById('adminLoginModal').classList.add('hidden');
-    }
+    function closeAdminLogin() { document.getElementById('adminLoginModal').classList.add('hidden'); }
 
     function verifyAdmin() {
       const pw = document.getElementById('adminPassword').value;
@@ -785,25 +876,34 @@ function getIndexHTML(): string {
     }
 
     async function initData() {
-      // Seed data on first load
       await fetch('/api/seed', { method: 'POST' });
       await loadTeachers();
       await loadCategories();
       await loadTodos();
       await loadStats();
+      await loadPhrases();
     }
 
     function updateAdminUI() {
       const isAdmin = currentRole === 'admin';
       document.getElementById('adminBadge').classList.toggle('hidden', !isAdmin);
       document.getElementById('adminMgmtBtn').classList.toggle('hidden', !isAdmin);
-      
       const cogIcon = document.getElementById('adminToggleBtn').querySelector('i');
-      if (isAdmin) {
-        cogIcon.className = 'fas fa-user text-yellow-300';
+      cogIcon.className = isAdmin ? 'fas fa-user text-yellow-300' : 'fas fa-cog';
+    }
+
+    // ===== Completed Filter =====
+    function toggleCompletedFilter() {
+      completedFilterActive = !completedFilterActive;
+      const btn = document.getElementById('completedFilterBtn');
+      if (completedFilterActive) {
+        currentStatusFilter = 'completed';
+        btn.className = 'px-3 py-1.5 bg-green-500 hover:bg-green-600 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1 text-white shadow-lg';
       } else {
-        cogIcon.className = 'fas fa-cog';
+        currentStatusFilter = '';
+        btn.className = 'px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1';
       }
+      loadTodos();
     }
 
     // ===== Dark Mode =====
@@ -812,19 +912,12 @@ function getIndexHTML(): string {
       document.documentElement.classList.toggle('dark', darkMode);
       document.body.classList.toggle('bg-gray-50', !darkMode);
       document.body.classList.toggle('bg-slate-900', darkMode);
-      const icon = document.getElementById('darkModeIcon');
-      icon.className = darkMode ? 'fas fa-sun' : 'fas fa-moon';
+      document.getElementById('darkModeIcon').className = darkMode ? 'fas fa-sun' : 'fas fa-moon';
     }
 
     // ===== Mobile Search =====
-    function toggleMobileSearch() {
-      document.getElementById('mobileSearch').classList.toggle('hidden');
-    }
-
-    function handleSearch() {
-      loadTodos();
-    }
-
+    function toggleMobileSearch() { document.getElementById('mobileSearch').classList.toggle('hidden'); }
+    function handleSearch() { loadTodos(); }
     function handleMobileSearch() {
       document.getElementById('searchInput').value = document.getElementById('mobileSearchInput').value;
       loadTodos();
@@ -835,11 +928,9 @@ function getIndexHTML(): string {
       currentPeriod = p;
       ['All','Day','Week','Month'].forEach(k => {
         const btn = document.getElementById('period' + k);
-        if (k.toLowerCase() === p) {
-          btn.className = 'px-3 py-1.5 rounded-md text-sm font-medium transition-all bg-mint-500 text-white';
-        } else {
-          btn.className = 'px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300';
-        }
+        btn.className = k.toLowerCase() === p
+          ? 'px-3 py-1.5 rounded-md text-sm font-medium transition-all bg-mint-500 text-white'
+          : 'px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300';
       });
       loadTodos();
     }
@@ -848,37 +939,28 @@ function getIndexHTML(): string {
     async function loadTeachers() {
       const res = await fetch('/api/teachers');
       teachersData = await res.json();
-      
-      // Update filter dropdown
       const filterSelect = document.getElementById('filterTeacher');
       filterSelect.innerHTML = '<option value="">모든 담당자</option>';
-      teachersData.forEach(t => {
-        filterSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>';
-      });
-
-      // Update modal dropdown
+      teachersData.forEach(t => { filterSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>'; });
       const todoSelect = document.getElementById('todoTeacher');
       todoSelect.innerHTML = '<option value="">선택</option>';
-      teachersData.forEach(t => {
-        todoSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>';
-      });
+      teachersData.forEach(t => { todoSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>'; });
     }
 
     async function loadCategories() {
       const res = await fetch('/api/categories');
       categoriesData = await res.json();
-      
       const filterSelect = document.getElementById('filterCategory');
       filterSelect.innerHTML = '<option value="">모든 업무구분</option>';
-      categoriesData.forEach(c => {
-        filterSelect.innerHTML += '<option value="'+c.id+'">'+c.name+'</option>';
-      });
-
+      categoriesData.forEach(c => { filterSelect.innerHTML += '<option value="'+c.id+'">'+c.name+'</option>'; });
       const todoSelect = document.getElementById('todoCategory');
       todoSelect.innerHTML = '<option value="">선택 안함</option>';
-      categoriesData.forEach(c => {
-        todoSelect.innerHTML += '<option value="'+c.id+'">'+c.name+'</option>';
-      });
+      categoriesData.forEach(c => { todoSelect.innerHTML += '<option value="'+c.id+'">'+c.name+'</option>'; });
+    }
+
+    async function loadPhrases() {
+      const res = await fetch('/api/phrases');
+      frequentPhrases = await res.json();
     }
 
     async function loadTodos() {
@@ -892,7 +974,8 @@ function getIndexHTML(): string {
         period: currentPeriod,
         search: search,
         teacher_id: teacherId,
-        category_id: categoryId
+        category_id: categoryId,
+        status: currentStatusFilter
       });
 
       const res = await fetch('/api/todos?' + params);
@@ -904,41 +987,38 @@ function getIndexHTML(): string {
       const isAdmin = currentRole === 'admin';
       const res = await fetch('/api/stats?admin=' + isAdmin);
       const stats = await res.json();
-      
       document.getElementById('statTotal').textContent = stats.total;
       document.getElementById('statInProgress').textContent = stats.inProgress;
       document.getElementById('statWaiting').textContent = stats.waitingApproval;
-      document.getElementById('statAvgProgress').textContent = stats.avgProgress + '%';
+      document.getElementById('statMotto').textContent = stats.motto || '관리자가 문구를 설정할 수 있습니다.';
     }
 
-    // ===== Render Todos =====
+    // ===== Status Helpers =====
+    function getStatusLabel(status) {
+      const map = { completed: '완료', working: '작업중', reported: '보고(완)', hold: '보류' };
+      return map[status] || '작업중';
+    }
+
+    function getStatusBadge(todo) {
+      const s = todo.status || 'working';
+      if (s === 'completed') return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"><i class="fas fa-check-circle mr-1"></i>완료</span>';
+      if (s === 'reported') return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"><i class="fas fa-flag mr-1"></i>보고(완)</span>';
+      if (s === 'hold') return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200"><i class="fas fa-pause-circle mr-1"></i>보류</span>';
+      return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"><i class="fas fa-spinner mr-1"></i>작업중</span>';
+    }
+
     function getProgressLabel(progress) {
       if (progress === 0) return '미시작';
       if (progress <= 25) return '1단계: 시작';
       if (progress <= 50) return '2단계: 중간';
       if (progress <= 75) return '3단계: 발전';
       if (progress < 100) return '4단계: 마무리';
-      return '완료 대기';
-    }
-
-    function getProgressColor(progress) {
-      if (progress <= 25) return 'from-red-300 to-red-400';
-      if (progress <= 50) return 'from-yellow-300 to-yellow-400';
-      if (progress <= 75) return 'from-blue-300 to-blue-400';
-      return 'from-mint-300 to-mint-500';
-    }
-
-    function getStatusBadge(todo) {
-      if (todo.is_approved) return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"><i class="fas fa-check-circle mr-1"></i>완료</span>';
-      if (todo.progress === 100) return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"><i class="fas fa-clock mr-1"></i>승인대기</span>';
-      if (todo.progress > 0) return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"><i class="fas fa-spinner mr-1"></i>진행중</span>';
-      return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"><i class="fas fa-minus mr-1"></i>미시작</span>';
+      return '완료';
     }
 
     function getDueDateClass(dueDate) {
       if (!dueDate) return '';
-      const today = new Date();
-      today.setHours(0,0,0,0);
+      const today = new Date(); today.setHours(0,0,0,0);
       const due = new Date(dueDate);
       const diff = Math.ceil((due - today) / (1000*60*60*24));
       if (diff < 0) return 'text-red-600 font-semibold';
@@ -946,6 +1026,7 @@ function getIndexHTML(): string {
       return 'text-gray-600 dark:text-gray-400';
     }
 
+    // ===== Render Todos =====
     function renderTodos() {
       const container = document.getElementById('todoList');
       const isAdmin = currentRole === 'admin';
@@ -959,92 +1040,100 @@ function getIndexHTML(): string {
       todosData.forEach(todo => {
         const catColor = todo.category_color || '#5EEAD4';
         const isPrivate = todo.is_private;
-        const commentBadge = todo.comment_count > 0 ? '<span class="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-mint-100 text-mint-700 text-xs font-bold">' + todo.comment_count + '</span>' : '';
-        
+        const commentBadge = todo.comment_count > 0 ? '<span class="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-mint-100 text-mint-700 text-xs font-bold dark:bg-mint-900 dark:text-mint-200">' + todo.comment_count + '</span>' : '';
+        const isCompleted = todo.status === 'completed';
+        const isDisabled = isCompleted;
+
         // Desktop Row
-        html += '<div class="hidden md:grid grid-cols-12 gap-2 px-6 py-4 hover:bg-gray-50 dark:hover:bg-slate-750 transition items-center group ' + (isPrivate ? 'opacity-60 bg-gray-50 dark:bg-slate-900' : '') + ' fade-in">';
+        html += '<div class="hidden md:grid grid-cols-12 gap-2 px-6 py-4 hover:bg-gray-50 dark:hover:bg-slate-750 transition items-center ' + (isPrivate ? 'opacity-60 bg-gray-50 dark:bg-slate-900' : '') + (isCompleted ? ' bg-green-50/50 dark:bg-green-900/10' : '') + ' fade-in">';
         
-        // Category
         html += '<div class="col-span-1"><span class="inline-block px-2 py-1 rounded-md text-xs font-medium text-white" style="background-color:'+catColor+'">'+(todo.category_name||'미분류')+'</span></div>';
         
-        // Title
         html += '<div class="col-span-3">';
         if (isPrivate && isAdmin) html += '<i class="fas fa-lock text-yellow-500 mr-1 text-xs"></i>';
-        html += '<span class="text-sm font-medium text-gray-800 dark:text-white cursor-pointer hover:text-mint-600 inline-edit" data-id="'+todo.id+'" data-field="title" onclick="startInlineEdit(this, '+todo.id+', &quot;title&quot;)">'+todo.title+'</span>';
+        html += '<span class="text-sm font-medium text-gray-800 dark:text-white cursor-pointer hover:text-mint-600 '+(isCompleted?'line-through opacity-70':'')+'" onclick="startInlineEdit(this, '+todo.id+', &quot;title&quot;)">'+todo.title+'</span>';
         html += '</div>';
         
-        // Teacher
         html += '<div class="col-span-1"><span class="text-sm text-gray-600 dark:text-gray-300">'+(todo.teacher_name||'-')+'</span></div>';
-        
-        // Due Date
         html += '<div class="col-span-1"><span class="text-xs '+getDueDateClass(todo.due_date)+'">'+(todo.due_date || '-')+'</span></div>';
         
-        // Progress Slider
+        // Progress Slider with live percentage
         html += '<div class="col-span-3 flex items-center gap-2">';
-        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="flex-1 slider-bg" '+(todo.is_approved ? 'disabled' : '')+' onchange="updateProgress('+todo.id+', this.value)" oninput="this.nextElementSibling.textContent=this.value+\'%\'">';
-        html += '<span class="text-xs font-semibold text-gray-600 dark:text-gray-300 w-10 text-right">'+todo.progress+'%</span>';
+        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="flex-1 slider-bg" '+(isDisabled ? 'disabled' : '')+' onchange="updateProgress('+todo.id+', this.value)" oninput="updateProgressDisplay(this)">';
+        html += '<span class="text-xs font-bold text-mint-600 dark:text-mint-400 w-12 text-right tabular-nums">'+todo.progress+'%</span>';
         html += '</div>';
         
-        // Status
         html += '<div class="col-span-1">'+getStatusBadge(todo)+'</div>';
         
         // Actions
         html += '<div class="col-span-2 flex items-center justify-end gap-1">';
-        // Comment button
-        html += '<button onclick="showComments('+todo.id+')" class="p-1.5 text-gray-400 hover:text-mint-600 transition relative" title="코멘트"><i class="fas fa-comment-dots"></i>'+commentBadge+'</button>';
+        html += '<button onclick="showComments('+todo.id+')" class="p-1.5 text-gray-400 hover:text-mint-600 transition relative" title="톡"><i class="fas fa-comment-dots"></i>'+commentBadge+'</button>';
         
         if (isAdmin) {
-          // Private toggle
-          html += '<button onclick="togglePrivate('+todo.id+', '+(!isPrivate)+' )" class="p-1.5 '+(isPrivate ? 'text-yellow-500' : 'text-gray-400')+' hover:text-yellow-600 transition" title="비공개 전환"><i class="fas '+(isPrivate ? 'fa-lock' : 'fa-lock-open')+'"></i></button>';
-          // Approve button
-          if (todo.progress === 100 && !todo.is_approved) {
-            html += '<button onclick="approveTodo('+todo.id+')" class="p-1.5 text-green-500 hover:text-green-700 transition animate-pulse" title="최종 승인"><i class="fas fa-check-double"></i></button>';
+          html += '<button onclick="togglePrivate('+todo.id+', '+(!isPrivate)+')" class="p-1.5 '+(isPrivate ? 'text-yellow-500' : 'text-gray-400')+' hover:text-yellow-600 transition" title="비공개"><i class="fas '+(isPrivate ? 'fa-lock' : 'fa-lock-open')+'"></i></button>';
+          // Show confirm button when status is reported (100% and waiting for admin approval)
+          if (todo.status === 'reported') {
+            html += '<button onclick="approveTodo('+todo.id+')" class="p-1.5 text-green-500 hover:text-green-700 transition animate-pulse" title="확인 완료"><i class="fas fa-check-double"></i></button>';
           }
+          // Status selector for admin
+          html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white">';
+          ['working','reported','hold','completed'].forEach(s => {
+            html += '<option value="'+s+'"'+((todo.status===s)?' selected':'')+'>'+getStatusLabel(s)+'</option>';
+          });
+          html += '</select>';
         }
-        // Edit
+        
         html += '<button onclick="editTodo('+todo.id+')" class="p-1.5 text-gray-400 hover:text-blue-600 transition" title="수정"><i class="fas fa-pen"></i></button>';
-        // Delete
         html += '<button onclick="deleteTodo('+todo.id+')" class="p-1.5 text-gray-400 hover:text-red-600 transition" title="삭제"><i class="fas fa-trash"></i></button>';
-        html += '</div>';
-        html += '</div>';
+        html += '</div></div>';
 
         // Mobile Card
-        html += '<div class="md:hidden p-4 border-b border-gray-100 dark:border-slate-700 ' + (isPrivate ? 'opacity-60 bg-gray-50 dark:bg-slate-900' : '') + ' fade-in">';
+        html += '<div class="md:hidden p-4 border-b border-gray-100 dark:border-slate-700 ' + (isPrivate ? 'opacity-60 bg-gray-50 dark:bg-slate-900' : '') + (isCompleted ? ' bg-green-50/50' : '') + ' fade-in">';
         html += '<div class="flex items-center justify-between mb-2">';
         html += '<div class="flex items-center gap-2">';
         html += '<span class="inline-block px-2 py-0.5 rounded-md text-xs font-medium text-white" style="background-color:'+catColor+'">'+(todo.category_name||'미분류')+'</span>';
-        if (isPrivate && isAdmin) html += '<i class="fas fa-lock text-yellow-500 text-xs"></i>';
+        html += getStatusBadge(todo);
         html += '</div>';
         html += '<div class="flex items-center gap-1">';
-        html += '<button onclick="showComments('+todo.id+')" class="p-1 text-gray-400 hover:text-mint-600 text-sm relative"><i class="fas fa-comment-dots"></i>'+commentBadge+'</button>';
+        html += '<button onclick="showComments('+todo.id+')" class="p-1 text-gray-400 hover:text-mint-600 text-sm"><i class="fas fa-comment-dots"></i>'+commentBadge+'</button>';
         if (isAdmin) {
-          html += '<button onclick="togglePrivate('+todo.id+', '+(!isPrivate)+')" class="p-1 '+(isPrivate ? 'text-yellow-500' : 'text-gray-400')+' text-sm"><i class="fas '+(isPrivate ? 'fa-lock' : 'fa-lock-open')+'"></i></button>';
-          if (todo.progress === 100 && !todo.is_approved) {
+          if (todo.status === 'reported') {
             html += '<button onclick="approveTodo('+todo.id+')" class="p-1 text-green-500 text-sm animate-pulse"><i class="fas fa-check-double"></i></button>';
           }
         }
         html += '<button onclick="editTodo('+todo.id+')" class="p-1 text-gray-400 text-sm"><i class="fas fa-pen"></i></button>';
         html += '<button onclick="deleteTodo('+todo.id+')" class="p-1 text-gray-400 text-sm"><i class="fas fa-trash"></i></button>';
         html += '</div></div>';
-        html += '<h4 class="font-medium text-gray-800 dark:text-white text-sm mb-1 cursor-pointer" onclick="startInlineEdit(this, '+todo.id+', &quot;title&quot;)">'+todo.title+'</h4>';
+        html += '<h4 class="font-medium text-gray-800 dark:text-white text-sm mb-1 '+(isCompleted?'line-through opacity-70':'')+'">'+todo.title+'</h4>';
         html += '<div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">';
         html += '<span><i class="fas fa-user mr-1"></i>'+(todo.teacher_name||'-')+'</span>';
         html += '<span class="'+getDueDateClass(todo.due_date)+'"><i class="fas fa-calendar mr-1"></i>'+(todo.due_date||'기한 없음')+'</span>';
         html += '</div>';
-        html += '<div class="flex items-center gap-2 mb-2">';
-        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="flex-1 slider-bg" '+(todo.is_approved ? 'disabled' : '')+' onchange="updateProgress('+todo.id+', this.value)" oninput="this.nextElementSibling.textContent=this.value+\'%\'">';
-        html += '<span class="text-xs font-semibold w-10 text-right">'+todo.progress+'%</span>';
+        html += '<div class="flex items-center gap-2 mb-1">';
+        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="flex-1 slider-bg" '+(isDisabled ? 'disabled' : '')+' onchange="updateProgress('+todo.id+', this.value)" oninput="updateProgressDisplay(this)">';
+        html += '<span class="text-xs font-bold text-mint-600 w-12 text-right tabular-nums">'+todo.progress+'%</span>';
         html += '</div>';
-        html += '<div class="flex items-center justify-between">';
-        html += '<span class="text-xs text-gray-400">'+getProgressLabel(todo.progress)+'</span>';
-        html += getStatusBadge(todo);
-        html += '</div></div>';
+        html += '<div class="text-xs text-gray-400">'+getProgressLabel(todo.progress)+'</div>';
+        html += '</div>';
       });
 
       container.innerHTML = html;
     }
 
-    // ===== CRUD Operations =====
+    // ===== Progress Display Update (real-time) =====
+    function updateProgressDisplay(slider) {
+      const span = slider.nextElementSibling;
+      span.textContent = slider.value + '%';
+      // Also change color based on value
+      const v = parseInt(slider.value);
+      if (v === 100) { span.className = 'text-xs font-bold text-green-600 dark:text-green-400 w-12 text-right tabular-nums'; }
+      else if (v >= 75) { span.className = 'text-xs font-bold text-mint-600 dark:text-mint-400 w-12 text-right tabular-nums'; }
+      else if (v >= 50) { span.className = 'text-xs font-bold text-blue-600 dark:text-blue-400 w-12 text-right tabular-nums'; }
+      else if (v >= 25) { span.className = 'text-xs font-bold text-yellow-600 dark:text-yellow-400 w-12 text-right tabular-nums'; }
+      else { span.className = 'text-xs font-bold text-gray-500 dark:text-gray-400 w-12 text-right tabular-nums'; }
+    }
+
+    // ===== CRUD =====
     function showAddTodoModal() {
       document.getElementById('todoModalTitle').innerHTML = '<i class="fas fa-plus-circle text-mint-500 mr-2"></i>새 할 일 추가';
       document.getElementById('todoTitle').value = '';
@@ -1069,9 +1158,7 @@ function getIndexHTML(): string {
       document.getElementById('todoModal').classList.remove('hidden');
     }
 
-    function closeTodoModal() {
-      document.getElementById('todoModal').classList.add('hidden');
-    }
+    function closeTodoModal() { document.getElementById('todoModal').classList.add('hidden'); }
 
     async function saveTodo() {
       const id = document.getElementById('editTodoId').value;
@@ -1080,32 +1167,14 @@ function getIndexHTML(): string {
       const teacherId = document.getElementById('todoTeacher').value;
       const categoryId = document.getElementById('todoCategory').value;
       const dueDate = document.getElementById('todoDueDate').value;
-
       if (!title) { alert('업무명을 입력해 주세요.'); return; }
       if (!teacherId) { alert('담당자를 선택해 주세요.'); return; }
-
-      const body = {
-        title,
-        description: desc,
-        teacher_id: parseInt(teacherId),
-        category_id: categoryId ? parseInt(categoryId) : null,
-        due_date: dueDate || null
-      };
-
+      const body = { title, description: desc, teacher_id: parseInt(teacherId), category_id: categoryId ? parseInt(categoryId) : null, due_date: dueDate || null };
       if (id) {
-        await fetch('/api/todos/' + id, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
+        await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       } else {
-        await fetch('/api/todos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
+        await fetch('/api/todos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       }
-
       closeTodoModal();
       loadTodos();
       loadStats();
@@ -1114,38 +1183,32 @@ function getIndexHTML(): string {
     async function deleteTodo(id) {
       if (!confirm('이 항목을 삭제하시겠습니까?')) return;
       await fetch('/api/todos/' + id, { method: 'DELETE' });
-      loadTodos();
-      loadStats();
+      loadTodos(); loadStats();
     }
 
     async function updateProgress(id, value) {
-      await fetch('/api/todos/' + id, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ progress: parseInt(value) })
-      });
-      loadTodos();
-      loadStats();
+      const v = parseInt(value);
+      const updates = { progress: v };
+      // Auto set status to 'reported' when reaching 100%
+      if (v === 100) { updates.status = 'reported'; }
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+      loadTodos(); loadStats();
+    }
+
+    async function updateStatus(id, status) {
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      loadTodos(); loadStats();
     }
 
     async function togglePrivate(id, isPrivate) {
-      await fetch('/api/todos/' + id, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_private: isPrivate })
-      });
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_private: isPrivate }) });
       loadTodos();
     }
 
     async function approveTodo(id) {
-      if (!confirm('이 업무를 최종 승인(마감)하시겠습니까?')) return;
-      await fetch('/api/todos/' + id, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_approved: true })
-      });
-      loadTodos();
-      loadStats();
+      if (!confirm('이 업무를 확인 완료 처리하시겠습니까?')) return;
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: true, status: 'completed' }) });
+      loadTodos(); loadStats();
     }
 
     // ===== Inline Editing =====
@@ -1155,62 +1218,77 @@ function getIndexHTML(): string {
       input.type = 'text';
       input.value = currentText;
       input.className = 'px-2 py-1 border border-mint-400 rounded text-sm w-full focus:ring-2 focus:ring-mint-400 outline-none dark:bg-slate-700 dark:text-white';
-      
       input.onblur = () => saveInlineEdit(input, el, id, field, currentText);
-      input.onkeydown = (e) => {
-        if (e.key === 'Enter') input.blur();
-        if (e.key === 'Escape') { el.textContent = currentText; input.replaceWith(el); }
-      };
-      
+      input.onkeydown = (e) => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { el.textContent = currentText; input.replaceWith(el); } };
       el.replaceWith(input);
-      input.focus();
-      input.select();
+      input.focus(); input.select();
     }
 
     async function saveInlineEdit(input, originalEl, id, field, originalText) {
       const newValue = input.value.trim();
       if (newValue && newValue !== originalText) {
-        await fetch('/api/todos/' + id, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [field]: newValue })
-        });
+        await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [field]: newValue }) });
         loadTodos();
-      } else {
-        originalEl.textContent = originalText;
-        input.replaceWith(originalEl);
-      }
+      } else { originalEl.textContent = originalText; input.replaceWith(originalEl); }
     }
 
-    // ===== Comments =====
+    // ===== Chat/Comments =====
     async function showComments(todoId) {
       document.getElementById('commentTodoId').value = todoId;
       document.getElementById('commentModal').classList.remove('hidden');
-      document.getElementById('commentInputArea').classList.toggle('hidden', currentRole !== 'admin');
-      
+      // Set chat title
+      const todo = todosData.find(t => t.id === todoId);
+      document.getElementById('chatTodoTitle').textContent = todo ? '- ' + todo.title : '';
+
       const res = await fetch('/api/todos/' + todoId + '/comments');
       const comments = await res.json();
       
       const container = document.getElementById('commentList');
       if (comments.length === 0) {
-        container.innerHTML = '<div class="text-center text-gray-400 py-4"><i class="fas fa-comment-slash text-2xl mb-2"></i><p class="text-sm">코멘트가 없습니다</p></div>';
+        container.innerHTML = '<div class="text-center text-gray-400 py-8"><i class="fas fa-comment-slash text-3xl mb-2"></i><p class="text-sm">아직 메시지가 없습니다</p><p class="text-xs mt-1">톡을 보내보세요!</p></div>';
       } else {
-        container.innerHTML = comments.map(c => 
-          '<div class="bg-gray-50 dark:bg-slate-700 rounded-lg p-3 relative">' +
-          '<div class="flex items-start gap-2">' +
-          '<i class="fas fa-comment text-mint-500 mt-1"></i>' +
-          '<div class="flex-1">' +
+        container.innerHTML = comments.map(c => {
+          const isAdminMsg = c.author_type === 'admin';
+          return '<div class="flex '+(isAdminMsg ? 'justify-start' : 'justify-end')+'">' +
+          '<div class="max-w-[80%] '+(isAdminMsg ? 'chat-bubble-admin' : 'chat-bubble-user')+' px-3 py-2 relative group">' +
+          '<div class="flex items-center gap-1 mb-0.5">' +
+          '<span class="text-xs font-semibold '+(isAdminMsg ? 'text-mint-700 dark:text-mint-300' : 'text-indigo-700 dark:text-indigo-300')+'">'+(isAdminMsg ? '<i class="fas fa-shield-alt mr-1"></i>관리자' : '<i class="fas fa-user mr-1"></i>'+(c.author_name||'담당자'))+'</span>' +
+          '</div>' +
           '<p class="text-sm text-gray-700 dark:text-gray-200">' + c.content + '</p>' +
           '<p class="text-xs text-gray-400 mt-1">' + new Date(c.created_at).toLocaleString('ko-KR') + '</p>' +
-          '</div>' +
-          (currentRole === 'admin' ? '<button onclick="deleteComment('+c.id+', '+todoId+')" class="text-gray-300 hover:text-red-500 text-xs"><i class="fas fa-times"></i></button>' : '') +
-          '</div></div>'
-        ).join('');
+          (currentRole === 'admin' ? '<button onclick="deleteComment('+c.id+', '+todoId+')" class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs hidden group-hover:flex items-center justify-center"><i class="fas fa-times"></i></button>' : '') +
+          '</div></div>';
+        }).join('');
+        // Scroll to bottom
+        container.scrollTop = container.scrollHeight;
       }
     }
 
     function closeCommentModal() {
       document.getElementById('commentModal').classList.add('hidden');
+      document.getElementById('phraseSuggestions').classList.add('hidden');
+    }
+
+    // Phrase suggestions on input
+    function onChatInput() {
+      const input = document.getElementById('commentInput');
+      const val = input.value.trim().toLowerCase();
+      const sugBox = document.getElementById('phraseSuggestions');
+      
+      if (val.length < 1) { sugBox.classList.add('hidden'); return; }
+      
+      const matches = frequentPhrases.filter(p => p.phrase.toLowerCase().includes(val)).slice(0, 5);
+      if (matches.length === 0) { sugBox.classList.add('hidden'); return; }
+      
+      sugBox.innerHTML = matches.map(p =>
+        '<div class="px-3 py-2 hover:bg-mint-50 dark:hover:bg-slate-600 cursor-pointer text-sm text-gray-700 dark:text-gray-200 border-b border-gray-100 dark:border-slate-600 last:border-0" onclick="selectPhrase(this.textContent)">' + p.phrase + '</div>'
+      ).join('');
+      sugBox.classList.remove('hidden');
+    }
+
+    function selectPhrase(phrase) {
+      document.getElementById('commentInput').value = phrase;
+      document.getElementById('phraseSuggestions').classList.add('hidden');
     }
 
     async function addComment() {
@@ -1218,15 +1296,21 @@ function getIndexHTML(): string {
       const content = document.getElementById('commentInput').value.trim();
       if (!content) return;
       
+      const todo = todosData.find(t => t.id == todoId);
+      const authorType = currentRole === 'admin' ? 'admin' : 'user';
+      const authorName = (currentRole !== 'admin' && todo) ? todo.teacher_name : '';
+
       await fetch('/api/todos/' + todoId + '/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content, author_type: authorType, author_name: authorName })
       });
       
       document.getElementById('commentInput').value = '';
-      showComments(todoId);
-      loadTodos();
+      document.getElementById('phraseSuggestions').classList.add('hidden');
+      await showComments(parseInt(todoId));
+      await loadTodos();
+      await loadPhrases();
     }
 
     async function deleteComment(commentId, todoId) {
@@ -1240,74 +1324,65 @@ function getIndexHTML(): string {
       document.getElementById('adminPanelModal').classList.remove('hidden');
       renderAdminTeachers();
       renderAdminCategories();
+      // Load current motto
+      fetch('/api/settings/admin_motto').then(r=>r.json()).then(d => {
+        document.getElementById('mottoInput').value = d.value || '';
+      });
     }
 
-    function closeAdminPanel() {
-      document.getElementById('adminPanelModal').classList.add('hidden');
+    function closeAdminPanel() { document.getElementById('adminPanelModal').classList.add('hidden'); }
+
+    async function saveMotto() {
+      const val = document.getElementById('mottoInput').value.trim();
+      await fetch('/api/settings/admin_motto', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: val }) });
+      loadStats();
+      alert('문구가 저장되었습니다!');
     }
 
     function renderAdminTeachers() {
-      const container = document.getElementById('teacherList');
-      container.innerHTML = teachersData.map(t =>
+      document.getElementById('teacherList').innerHTML = teachersData.map(t =>
         '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg">' +
         '<span class="text-sm text-gray-700 dark:text-gray-200"><i class="fas fa-user text-mint-500 mr-2"></i>' + t.name + '</span>' +
-        '<button onclick="deleteTeacher('+t.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button>' +
-        '</div>'
+        '<button onclick="deleteTeacher('+t.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button></div>'
       ).join('');
     }
 
     function renderAdminCategories() {
-      const container = document.getElementById('categoryList');
-      container.innerHTML = categoriesData.map(c =>
+      document.getElementById('categoryList').innerHTML = categoriesData.map(c =>
         '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg">' +
-        '<div class="flex items-center gap-2">' +
-        '<div class="w-4 h-4 rounded" style="background-color:'+c.color+'"></div>' +
-        '<span class="text-sm text-gray-700 dark:text-gray-200">' + c.name + '</span>' +
-        '</div>' +
-        '<button onclick="deleteCategory('+c.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button>' +
-        '</div>'
+        '<div class="flex items-center gap-2"><div class="w-4 h-4 rounded" style="background-color:'+c.color+'"></div>' +
+        '<span class="text-sm text-gray-700 dark:text-gray-200">' + c.name + '</span></div>' +
+        '<button onclick="deleteCategory('+c.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"></i></button></div>'
       ).join('');
     }
 
     async function addTeacher() {
       const name = document.getElementById('newTeacherName').value.trim();
       if (!name) return;
-      await fetch('/api/teachers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
-      });
+      await fetch('/api/teachers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
       document.getElementById('newTeacherName').value = '';
-      await loadTeachers();
-      renderAdminTeachers();
+      await loadTeachers(); renderAdminTeachers();
     }
 
     async function deleteTeacher(id) {
-      if (!confirm('이 선생님을 삭제하시겠습니까?')) return;
+      if (!confirm('삭제하시겠습니까?')) return;
       await fetch('/api/teachers/' + id, { method: 'DELETE' });
-      await loadTeachers();
-      renderAdminTeachers();
+      await loadTeachers(); renderAdminTeachers();
     }
 
     async function addCategory() {
       const name = document.getElementById('newCategoryName').value.trim();
       const color = document.getElementById('newCategoryColor').value;
       if (!name) return;
-      await fetch('/api/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, color })
-      });
+      await fetch('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, color }) });
       document.getElementById('newCategoryName').value = '';
-      await loadCategories();
-      renderAdminCategories();
+      await loadCategories(); renderAdminCategories();
     }
 
     async function deleteCategory(id) {
-      if (!confirm('이 카테고리를 삭제하시겠습니까?')) return;
+      if (!confirm('삭제하시겠습니까?')) return;
       await fetch('/api/categories/' + id, { method: 'DELETE' });
-      await loadCategories();
-      renderAdminCategories();
+      await loadCategories(); renderAdminCategories();
     }
 
     // ===== Excel Export =====
@@ -1320,31 +1395,21 @@ function getIndexHTML(): string {
         '마감기한': t.due_date || '-',
         '진행률(%)': t.progress,
         '진행단계': getProgressLabel(t.progress),
-        '승인여부': t.is_approved ? '완료' : (t.progress === 100 ? '승인대기' : '미완료'),
+        '상태': getStatusLabel(t.status),
         '비공개': t.is_private ? 'Y' : 'N',
-        '코멘트수': t.comment_count || 0
+        '톡수': t.comment_count || 0
       }));
-
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'To-Do List');
-      
-      // Column widths
-      ws['!cols'] = [
-        {wch:10}, {wch:30}, {wch:40}, {wch:10}, {wch:12}, {wch:10}, {wch:15}, {wch:10}, {wch:8}, {wch:10}
-      ];
-
-      const now = new Date().toISOString().slice(0,10);
-      XLSX.writeFile(wb, 'TDL_업무목록_' + now + '.xlsx');
+      ws['!cols'] = [{wch:10},{wch:30},{wch:40},{wch:10},{wch:12},{wch:10},{wch:15},{wch:10},{wch:8},{wch:8}];
+      XLSX.writeFile(wb, 'TDL_' + new Date().toISOString().slice(0,10) + '.xlsx');
     }
 
-    // ===== Auto Login Check =====
+    // ===== Auto Login =====
     window.addEventListener('DOMContentLoaded', () => {
       const savedRole = localStorage.getItem('tdl_role');
-      if (savedRole) {
-        currentRole = savedRole;
-        showMainApp();
-      }
+      if (savedRole) { currentRole = savedRole; showMainApp(); }
     });
   </script>
 </body>
