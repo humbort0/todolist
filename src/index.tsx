@@ -880,13 +880,6 @@ function getIndexHTML(): string {
           <i class="fas fa-users-cog text-yellow-500 mr-2"></i>\uad00\ub9ac\uc790 \ud328\ub110
         </h3>
         
-        <!-- Motto Section -->
-        <div class="mb-6 p-4 bg-blue-50 rounded-xl border border-blue-100 dark:bg-slate-700 dark:border-slate-600">
-          <h4 class="font-semibold text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-quote-left mr-2 text-blue-500"></i>Sharing a message (\ub300\uc2dc\ubcf4\ub4dc \ubb38\uad6c)</h4>
-          <div class="flex gap-2">
-            <input id="mottoInput" type="text" placeholder="\ubd80\uc11c\uc6d0\ub4e4\uc5d0\uac8c \uc804\ud560 \ubb38\uad6c\ub97c \uc785\ub825\ud558\uc138\uc694..." class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-600 dark:border-slate-500 dark:text-white">
-            <button onclick="saveMotto()" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-600 transition"><i class="fas fa-save mr-1"></i>\uc800\uc7a5</button>
-          </div>
         </div>
 
         <div class="grid md:grid-cols-2 gap-6">
@@ -1709,12 +1702,6 @@ function getIndexHTML(): string {
 
     function closeAdminPanel() { document.getElementById('adminPanelModal').classList.add('hidden'); }
 
-    async function saveMotto() {
-      const val = document.getElementById('mottoInput').value.trim();
-      await fetch('/api/settings/admin_motto', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: val }) });
-      loadStats();
-      alert('\ubb38\uad6c\uac00 \uc800\uc7a5\ub418\uc5c8\uc2b5\ub2c8\ub2e4!');
-    }
 
     function renderAdminTeachers() {
       document.getElementById('teacherList').innerHTML = teachersData.map((t, idx) =>
