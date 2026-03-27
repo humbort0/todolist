@@ -61,6 +61,14 @@ async function ensureDB(db: D1Database) {
       phrase TEXT NOT NULL UNIQUE,
       use_count INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS sharing_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      due_date TEXT,
+      note TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`)
   ])
 }
@@ -338,6 +346,62 @@ app.delete('/api/comments/:id', async (c) => {
   return c.json({ success: true })
 })
 
+// ===== Sharing Messages API =====
+app.get('/api/sharing', async (c) => {
+  await ensureDB(c.env.DB)
+  const { results } = await c.env.DB.prepare(
+    'SELECT * FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC'
+  ).all()
+  return c.json(results)
+})
+
+app.post('/api/sharing', async (c) => {
+  await ensureDB(c.env.DB)
+  const { content, due_date, note } = await c.req.json()
+  const result = await c.env.DB.prepare(
+    'INSERT INTO sharing_messages (content, due_date, note) VALUES (?, ?, ?)'
+  ).bind(content, due_date || null, note || '').run()
+  return c.json({ id: result.meta.last_row_id, content, due_date, note })
+})
+
+app.put('/api/sharing/:id', async (c) => {
+  const id = c.req.param('id')
+  const { content, due_date, note, is_active } = await c.req.json()
+  const sets: string[] = []
+  const vals: any[] = []
+  if (content !== undefined) { sets.push('content = ?'); vals.push(content) }
+  if (due_date !== undefined) { sets.push('due_date = ?'); vals.push(due_date) }
+  if (note !== undefined) { sets.push('note = ?'); vals.push(note) }
+  if (is_active !== undefined) { sets.push('is_active = ?'); vals.push(is_active ? 1 : 0) }
+  if (sets.length === 0) return c.json({ success: false })
+  vals.push(id)
+  await c.env.DB.prepare(`UPDATE sharing_messages SET ${sets.join(', ')} WHERE id = ?`).bind(...vals).run()
+  return c.json({ success: true })
+})
+
+app.delete('/api/sharing/:id', async (c) => {
+  const id = c.req.param('id')
+  await c.env.DB.prepare('DELETE FROM sharing_messages WHERE id = ?').bind(id).run()
+  return c.json({ success: true })
+})
+
+app.get('/api/sharing/weekly-count', async (c) => {
+  await ensureDB(c.env.DB)
+  // 이번 주 월요일 기준 (ISO week: 월~일)
+  const row = await c.env.DB.prepare(
+    "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1 AND created_at >= date('now', 'weekday 1', '-7 days')"
+  ).first()
+  return c.json({ count: row?.count || 0 })
+})
+
+app.get('/api/sharing/latest', async (c) => {
+  await ensureDB(c.env.DB)
+  const row = await c.env.DB.prepare(
+    'SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
+  ).first()
+  return c.json({ content: row?.content || '' })
+})
+
 // ===== Dashboard Stats API =====
 app.get('/api/stats', async (c) => {
   await ensureDB(c.env.DB)
@@ -349,13 +413,19 @@ app.get('/api/stats', async (c) => {
   const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'working'`).first()
   const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'reported'`).first()
 
-  const motto = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'admin_motto'").first()
+  const sharingWeekly = await c.env.DB.prepare(
+    "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1 AND created_at >= date('now', 'weekday 1', '-7 days')"
+  ).first()
+  const latestSharing = await c.env.DB.prepare(
+    'SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
+  ).first()
 
   return c.json({
     total: total?.count || 0,
     inProgress: inProgress?.count || 0,
     waitingApproval: waitingApproval?.count || 0,
-    motto: motto?.value || ''
+    sharingWeeklyCount: sharingWeekly?.count || 0,
+    sharingLatest: latestSharing?.content || ''
   })
 })
 
@@ -396,6 +466,13 @@ app.post('/api/seed', async (c) => {
   ])
 
   await c.env.DB.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('admin_motto', '\ud568\uaed8 \uc131\uc7a5\ud558\ub294 \uc6b0\ub9ac \ubd80\uc11c, \uc624\ub298\ub3c4 \ud654\uc774\ud305!')").run()
+
+  // Sharing Messages seed
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT INTO sharing_messages (content, due_date, note) VALUES ('\uc774\ubc88 \uc8fc \uae08\uc694\uc77c\uae4c\uc9c0 \ubd80\uc11c \ud68c\uc758 \uc790\ub8cc \uc900\ube44 \ubd80\ud0c1\ub4dc\ub9bd\ub2c8\ub2e4.', '2026-04-03', '\ud68c\uc758\uc2e4 2\uce35 \ub300\ud68c\uc758\uc2e4')"),
+    c.env.DB.prepare("INSERT INTO sharing_messages (content, due_date, note) VALUES ('\uc0c8\ud559\uae30 \uad50\uc721\uacfc\uc815 \ud3b8\uc131 \ubc29\ud5a5 \uacf5\uc720\ud569\ub2c8\ub2e4. \uac01\uc790 \uc758\uacac \uc815\ub9ac\ud574\uc8fc\uc138\uc694!', '2026-04-10', '')"),
+    c.env.DB.prepare("INSERT INTO sharing_messages (content, due_date, note) VALUES ('\uc6d4\uc694\uc77c \uc870\ud68c \uc2dc\uac04\uc5d0 \uc548\uc804\uad50\uc721 \uac74 \ubc1c\ud45c \uc608\uc815\uc785\ub2c8\ub2e4.', '2026-03-31', '\ubc15\uc9c0\ud6c8 \uc120\uc0dd\ub2d8 \ub2f4\ub2f9')"),
+  ])
 
   await c.env.DB.batch([
     c.env.DB.prepare("INSERT OR IGNORE INTO frequent_phrases (phrase, use_count) VALUES ('\ud655\uc778\ud588\uc2b5\ub2c8\ub2e4. \uc218\uace0\ud558\uc168\uc2b5\ub2c8\ub2e4.', 5)"),
@@ -556,6 +633,10 @@ function getIndexHTML(): string {
             <button onclick="toggleMobileSearch()" class="sm:hidden p-2 hover:bg-white/20 rounded-lg transition">
               <i class="fas fa-search"></i>
             </button>
+            <!-- Sharing Management Button (admin only) -->
+            <button id="sharingMgmtBtn" onclick="showSharingModal()" class="hidden p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="Sharing 관리">
+              <i class="fas fa-bullhorn text-yellow-200"></i>
+            </button>
             <!-- Completed Filter Button (마감 완료) -->
             <button id="completedFilterBtn" onclick="toggleCompletedFilter()" class="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1" data-tip="\ub9c8\uac10 \uc644\ub8cc \ud56d\ubaa9\ub9cc \ubcf4\uae30">
               <i class="fas fa-check-circle"></i>
@@ -623,15 +704,22 @@ function getIndexHTML(): string {
           <p id="statWaiting" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
           <p class="text-sm text-gray-500 dark:text-gray-400">\uad00\ubcf4\uace0(\uc644)</p>
         </div>
-        <!-- Motto Card -->
-        <div class="bg-blue-50 border border-blue-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4">
-          <div class="flex items-center justify-between mb-3">
-            <div class="w-10 h-10 bg-blue-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-quote-left text-blue-700"></i>
+        <!-- Sharing Message Card -->
+        <div onclick="toggleSharingPanel()" id="card-sharing" class="bg-blue-50 border border-blue-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 sm:w-10 sm:h-10 bg-blue-200 rounded-xl flex items-center justify-center">
+                <i class="fas fa-bullhorn text-blue-700 text-sm sm:text-base"></i>
+              </div>
+              <span class="text-xs text-blue-600 font-medium bg-blue-100 px-2 py-0.5 rounded-full dark:bg-slate-700 dark:text-blue-400">Sharing</span>
             </div>
-            <span class="text-xs text-blue-600 font-medium bg-blue-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-blue-400">Sharing a message</span>
+            <div id="sharingWeeklyBadge" class="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/40 px-2 py-1 rounded-full">
+              <i class="fas fa-comment-dots text-blue-500 text-xs"></i>
+              <span id="sharingWeeklyCount" class="text-xs font-bold text-blue-700 dark:text-blue-300">0</span>
+            </div>
           </div>
-          <p id="statMotto" class="text-sm font-medium text-gray-700 dark:text-gray-200 leading-relaxed line-clamp-3" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;"></p>
+          <p id="sharingLatestMsg" class="text-xs sm:text-sm md:text-base font-medium text-gray-700 dark:text-gray-200 leading-snug sm:leading-relaxed line-clamp-2 sm:line-clamp-3" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"></p>
+          <p class="text-xs text-blue-400 mt-1 hidden sm:block"><i class="fas fa-hand-pointer mr-1"></i>클릭하여 전체 보기</p>
         </div>
       </div>
 
@@ -642,6 +730,15 @@ function getIndexHTML(): string {
           <button onclick="closeCardDetail()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition"><i class="fas fa-times"></i></button>
         </div>
         <div id="cardDetailList" class="divide-y divide-gray-50 dark:divide-slate-700 max-h-72 overflow-y-auto"></div>
+      </div>
+
+      <!-- Sharing Messages Panel -->
+      <div id="sharingPanel" class="hidden mb-6 bg-white rounded-2xl shadow-sm border border-blue-100 overflow-hidden dark:bg-slate-800 dark:border-slate-700 card-detail-anim">
+        <div class="flex items-center justify-between px-5 py-3 bg-blue-50 dark:bg-slate-900 border-b border-blue-100 dark:border-slate-700">
+          <h3 class="text-sm font-bold text-blue-700 dark:text-blue-300"><i class="fas fa-bullhorn mr-2"></i>Sharing Messages</h3>
+          <button onclick="closeSharingPanel()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="sharingList" class="divide-y divide-gray-50 dark:divide-slate-700 max-h-80 overflow-y-auto"></div>
       </div>
 
       <!-- Teacher Cards -->
@@ -817,6 +914,44 @@ function getIndexHTML(): string {
     </div>
   </div>
 
+  <!-- Sharing Management Modal -->
+  <div id="sharingModal" class="fixed inset-0 z-50 hidden">
+    <div class="modal-overlay absolute inset-0" onclick="closeSharingModal()"></div>
+    <div class="relative flex items-center justify-center min-h-screen p-4">
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 relative z-10 modal-anim dark:bg-slate-800">
+        <h3 class="text-lg font-bold text-gray-800 mb-4 dark:text-white">
+          <i class="fas fa-bullhorn text-blue-500 mr-2"></i>Sharing Message 관리
+        </h3>
+        <!-- New Message Form -->
+        <div class="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-100 dark:bg-slate-700 dark:border-slate-600">
+          <h4 class="font-semibold text-sm text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-plus-circle mr-1 text-blue-500"></i>새 메시지 작성</h4>
+          <textarea id="sharingContent" rows="3" placeholder="공유할 메시지를 입력하세요..." class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-2 dark:bg-slate-600 dark:border-slate-500 dark:text-white"></textarea>
+          <div class="grid grid-cols-2 gap-2 mb-2">
+            <div>
+              <label class="text-xs text-gray-500 dark:text-gray-400">마감 날짜</label>
+              <input id="sharingDueDate" type="date" class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm dark:bg-slate-600 dark:border-slate-500 dark:text-white">
+            </div>
+            <div>
+              <label class="text-xs text-gray-500 dark:text-gray-400">기타 (메모)</label>
+              <input id="sharingNote" type="text" placeholder="참고사항..." class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm dark:bg-slate-600 dark:border-slate-500 dark:text-white">
+            </div>
+          </div>
+          <button onclick="saveSharing()" class="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+            <i class="fas fa-paper-plane mr-1"></i>등록
+          </button>
+        </div>
+        <!-- Existing Messages List -->
+        <div>
+          <h4 class="font-semibold text-sm text-gray-700 mb-2 dark:text-gray-200"><i class="fas fa-list mr-1 text-blue-500"></i>등록된 메시지</h4>
+          <div id="sharingMgmtList" class="space-y-2 max-h-60 overflow-y-auto"></div>
+        </div>
+        <div class="flex justify-end mt-4">
+          <button onclick="closeSharingModal()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Chat / Comment Modal -->
   <div id="commentModal" class="fixed inset-0 z-50 hidden">
     <div class="modal-overlay absolute inset-0" onclick="closeCommentModal()"></div>
@@ -964,6 +1099,7 @@ function getIndexHTML(): string {
       await fetch('/api/seed', { method: 'POST' });
       await loadTeachers();
       await loadCategories();
+      await loadSharingMessages();
       await loadTodos();
       await loadStats();
       await loadPhrases();
@@ -973,6 +1109,7 @@ function getIndexHTML(): string {
       const isAdmin = currentRole === 'admin';
       document.getElementById('adminBadge').classList.toggle('hidden', !isAdmin);
       document.getElementById('adminMgmtBtn').classList.toggle('hidden', !isAdmin);
+      document.getElementById('sharingMgmtBtn').classList.toggle('hidden', !isAdmin);
       const cogIcon = document.getElementById('adminToggleBtn').querySelector('i');
       cogIcon.className = isAdmin ? 'fas fa-user text-yellow-300' : 'fas fa-cog';
     }
@@ -1081,7 +1218,12 @@ function getIndexHTML(): string {
       document.getElementById('statTotal').textContent = stats.total;
       document.getElementById('statInProgress').textContent = stats.inProgress;
       document.getElementById('statWaiting').textContent = stats.waitingApproval;
-      document.getElementById('statMotto').textContent = stats.motto || '\uad00\ub9ac\uc790\uac00 \uba54\uc2dc\uc9c0\ub97c \uc124\uc815\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.';
+      // Sharing Message 카드 업데이트
+      document.getElementById('sharingWeeklyCount').textContent = stats.sharingWeeklyCount || 0;
+      const latestEl = document.getElementById('sharingLatestMsg');
+      if (latestEl) {
+        latestEl.textContent = stats.sharingLatest || '공유 메시지가 없습니다.';
+      }
     }
 
     // ===== Status Helpers =====
@@ -1549,9 +1691,6 @@ function getIndexHTML(): string {
       document.getElementById('adminPanelModal').classList.remove('hidden');
       renderAdminTeachers();
       renderAdminCategories();
-      fetch('/api/settings/admin_motto').then(r=>r.json()).then(d => {
-        document.getElementById('mottoInput').value = d.value || '';
-      });
     }
 
     function closeAdminPanel() { document.getElementById('adminPanelModal').classList.add('hidden'); }
@@ -1680,6 +1819,114 @@ function getIndexHTML(): string {
       document.getElementById('sortDueDate').className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'due_date' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
       document.getElementById('sortCreated').className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'created' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
       loadTodos();
+    }
+
+    // ===== Sharing Messages =====
+    let sharingData = [];
+    let sharingPanelOpen = false;
+
+    async function loadSharingMessages() {
+      const res = await fetch('/api/sharing');
+      sharingData = await res.json();
+    }
+
+    function toggleSharingPanel() {
+      sharingPanelOpen = !sharingPanelOpen;
+      const panel = document.getElementById('sharingPanel');
+      const card = document.getElementById('card-sharing');
+      if (sharingPanelOpen) {
+        card.classList.add('card-active');
+        renderSharingList();
+        panel.classList.remove('hidden');
+      } else {
+        card.classList.remove('card-active');
+        panel.classList.add('hidden');
+      }
+    }
+
+    function closeSharingPanel() {
+      sharingPanelOpen = false;
+      document.getElementById('sharingPanel').classList.add('hidden');
+      document.getElementById('card-sharing').classList.remove('card-active');
+    }
+
+    function renderSharingList() {
+      const container = document.getElementById('sharingList');
+      if (sharingData.length === 0) {
+        container.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm"><i class="fas fa-bullhorn text-2xl mb-2"><\/i><p>공유 메시지가 없습니다</p></div>';
+        return;
+      }
+      container.innerHTML = sharingData.map(m => {
+        const dueDateClass = m.due_date ? getDueDateClass(m.due_date) : '';
+        return '<div class="px-5 py-3 hover:bg-blue-50/50 dark:hover:bg-slate-750 transition">' +
+          '<div class="flex items-start justify-between gap-3">' +
+          '<div class="flex-1 min-w-0">' +
+          '<p class="text-sm text-gray-800 dark:text-gray-200">' + m.content + '</p>' +
+          (m.note ? '<p class="text-xs text-gray-400 mt-1"><i class="fas fa-sticky-note mr-1"><\/i>' + m.note + '</p>' : '') +
+          '</div>' +
+          '<div class="flex-shrink-0 text-right">' +
+          (m.due_date ? '<p class="text-xs font-medium ' + dueDateClass + '"><i class="fas fa-calendar-alt mr-1"><\/i>' + m.due_date + '</p>' : '') +
+          '<p class="text-xs text-gray-400 mt-0.5">' + new Date(m.created_at).toLocaleDateString('ko-KR') + '</p>' +
+          '</div></div></div>';
+      }).join('');
+    }
+
+    // Sharing Management Modal
+    function showSharingModal() {
+      document.getElementById('sharingModal').classList.remove('hidden');
+      document.getElementById('sharingContent').value = '';
+      document.getElementById('sharingDueDate').value = '';
+      document.getElementById('sharingNote').value = '';
+      renderSharingMgmtList();
+    }
+    function closeSharingModal() { document.getElementById('sharingModal').classList.add('hidden'); }
+
+    async function saveSharing() {
+      const content = document.getElementById('sharingContent').value.trim();
+      if (!content) { alert('메시지를 입력해 주세요.'); return; }
+      const due_date = document.getElementById('sharingDueDate').value || null;
+      const note = document.getElementById('sharingNote').value.trim();
+      await fetch('/api/sharing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, due_date, note })
+      });
+      document.getElementById('sharingContent').value = '';
+      document.getElementById('sharingDueDate').value = '';
+      document.getElementById('sharingNote').value = '';
+      await loadSharingMessages();
+      renderSharingMgmtList();
+      if (sharingPanelOpen) renderSharingList();
+      loadStats();
+    }
+
+    async function deleteSharing(id) {
+      if (!confirm('이 메시지를 삭제하시겠습니까?')) return;
+      await fetch('/api/sharing/' + id, { method: 'DELETE' });
+      await loadSharingMessages();
+      renderSharingMgmtList();
+      if (sharingPanelOpen) renderSharingList();
+      loadStats();
+    }
+
+    function renderSharingMgmtList() {
+      const container = document.getElementById('sharingMgmtList');
+      if (sharingData.length === 0) {
+        container.innerHTML = '<p class="text-center text-gray-400 text-sm py-4">등록된 메시지가 없습니다.</p>';
+        return;
+      }
+      container.innerHTML = sharingData.map(m => {
+        const dueDateClass = m.due_date ? getDueDateClass(m.due_date) : '';
+        return '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg">' +
+          '<div class="flex-1 min-w-0 mr-2">' +
+          '<p class="text-sm text-gray-700 dark:text-gray-200 truncate">' + m.content + '</p>' +
+          '<div class="flex items-center gap-2 mt-0.5">' +
+          (m.due_date ? '<span class="text-xs ' + dueDateClass + '"><i class="fas fa-calendar-alt mr-0.5"><\/i>' + m.due_date + '</span>' : '') +
+          (m.note ? '<span class="text-xs text-gray-400"><i class="fas fa-sticky-note mr-0.5"><\/i>' + m.note + '</span>' : '') +
+          '</div></div>' +
+          '<button onclick="deleteSharing(' + m.id + ')" class="text-red-400 hover:text-red-600 text-sm flex-shrink-0"><i class="fas fa-trash"><\/i></button>' +
+          '</div>';
+      }).join('');
     }
 
     // ===== Excel Export =====
