@@ -1148,7 +1148,7 @@ function getIndexHTML(): string {
           }
         } else {
           if (!isCompleted) {
-            html += '<button onclick="showMobileStatusMenu('+todo.id+', \x27'+todo.status+'\x27, event)" class="p-1 text-blue-500 text-sm" title="\uc0c1\ud0dc \ubcc0\uacbd"><i class="fas fa-exchange-alt"><\\/i></button>';
+            html += '<button onclick="showMobileStatusMenu('+todo.id+', &quot;'+todo.status+'&quot;, event)" class="p-1 text-blue-500 text-sm" title="\uc0c1\ud0dc \ubcc0\uacbd"><i class="fas fa-exchange-alt"><\\/i></button>';
           }
         }
         html += '<button onclick="editTodo('+todo.id+')" class="p-1 text-gray-400 text-sm"><i class="fas fa-pen"><\\/i></button>';
