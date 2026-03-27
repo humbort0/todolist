@@ -633,8 +633,8 @@ function getIndexHTML(): string {
             <button onclick="toggleMobileSearch()" class="sm:hidden p-2 hover:bg-white/20 rounded-lg transition">
               <i class="fas fa-search"></i>
             </button>
-            <!-- Sharing Management Button (admin only) -->
-            <button id="sharingMgmtBtn" onclick="showSharingModal()" class="hidden p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="Sharing 관리">
+            <!-- Sharing Message 작성 버튼 (모든 사용자) -->
+            <button id="sharingMgmtBtn" onclick="showSharingModal()" class="p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="Sharing 메시지">
               <i class="fas fa-bullhorn text-yellow-200"></i>
             </button>
             <!-- Completed Filter Button (마감 완료) -->
@@ -1109,7 +1109,6 @@ function getIndexHTML(): string {
       const isAdmin = currentRole === 'admin';
       document.getElementById('adminBadge').classList.toggle('hidden', !isAdmin);
       document.getElementById('adminMgmtBtn').classList.toggle('hidden', !isAdmin);
-      document.getElementById('sharingMgmtBtn').classList.toggle('hidden', !isAdmin);
       const cogIcon = document.getElementById('adminToggleBtn').querySelector('i');
       cogIcon.className = isAdmin ? 'fas fa-user text-yellow-300' : 'fas fa-cog';
     }
