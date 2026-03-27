@@ -513,15 +513,6 @@ function getIndexHTML(): string {
           </div>
           
           <div class="flex items-center space-x-1 sm:space-x-2">
-            <!-- Completed Filter Button -->
-            <button id="completedFilterBtn" onclick="toggleCompletedFilter()" class="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1" data-tip="\uc644\ub8cc \ud56d\ubaa9\ub9cc \ubcf4\uae30">
-              <i class="fas fa-check-circle"></i>
-              <span class="hidden sm:inline">\uc644\ub8cc</span>
-            </button>
-            <!-- Dark Mode -->
-            <button onclick="toggleDarkMode()" class="p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="\ub2e4\ud06c\ubaa8\ub4dc">
-              <i id="darkModeIcon" class="fas fa-moon"></i>
-            </button>
             <!-- Search -->
             <div class="relative hidden sm:block">
               <input id="searchInput" type="text" placeholder="\uac80\uc0c9..." 
@@ -532,6 +523,15 @@ function getIndexHTML(): string {
             <!-- Mobile Search Toggle -->
             <button onclick="toggleMobileSearch()" class="sm:hidden p-2 hover:bg-white/20 rounded-lg transition">
               <i class="fas fa-search"></i>
+            </button>
+            <!-- Completed Filter Button (마감 완료) -->
+            <button id="completedFilterBtn" onclick="toggleCompletedFilter()" class="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1" data-tip="\ub9c8\uac10 \uc644\ub8cc \ud56d\ubaa9\ub9cc \ubcf4\uae30">
+              <i class="fas fa-check-circle"></i>
+              <span class="hidden sm:inline">\ub9c8\uac10 \uc644\ub8cc</span>
+            </button>
+            <!-- Dark Mode -->
+            <button onclick="toggleDarkMode()" class="p-2 hover:bg-white/20 rounded-lg transition tooltip" data-tip="\ub2e4\ud06c\ubaa8\ub4dc">
+              <i id="darkModeIcon" class="fas fa-moon"></i>
             </button>
             <!-- Admin Badge -->
             <span id="adminBadge" class="hidden bg-yellow-400 text-yellow-900 px-2 py-1 rounded-full text-xs font-bold">
@@ -1115,14 +1115,18 @@ function getIndexHTML(): string {
         
         if (isAdmin) {
           html += '<button onclick="togglePrivate('+todo.id+', '+(!isPrivate)+')" class="p-1.5 '+(isPrivate ? 'text-yellow-500' : 'text-gray-400')+' hover:text-yellow-600 transition" title="\ube44\uacf5\uac1c"><i class="fas '+(isPrivate ? 'fa-lock' : 'fa-lock-open')+'"><\\/i></button>';
-          if (todo.status === 'reported') {
-            html += '<button onclick="approveTodo('+todo.id+')" class="p-1.5 text-green-500 hover:text-green-700 transition animate-pulse" title="\ud655\uc778 \uc644\ub8cc"><i class="fas fa-check-double"><\\/i></button>';
+          if (todo.status !== 'completed') {
+            html += '<button onclick="approveTodo('+todo.id+')" class="p-1.5 text-green-500 hover:text-green-700 transition" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
           }
-          html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" style="max-width:85px;">';
-          ['working','reported','hold','completed'].forEach(s => {
-            html += '<option value="'+s+'"'+((todo.status===s)?' selected':'')+'>'+getStatusLabel(s)+'</option>';
-          });
-          html += '</select>';
+        } else {
+          // Regular user: status selector
+          if (!isCompleted) {
+            html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" style="max-width:85px;">';
+            ['working','reported','hold'].forEach(s => {
+              html += '<option value="'+s+'"'+((todo.status===s)?' selected':'')+'>'+getStatusLabel(s)+'</option>';
+            });
+            html += '</select>';
+          }
         }
         
         html += '<button onclick="editTodo('+todo.id+')" class="p-1.5 text-gray-400 hover:text-blue-600 transition" title="\uc218\uc815"><i class="fas fa-pen"><\\/i></button>';
@@ -1139,8 +1143,12 @@ function getIndexHTML(): string {
         html += '<div class="flex items-center gap-1">';
         html += '<button onclick="showComments('+todo.id+')" class="p-1 text-gray-400 hover:text-mint-600 text-sm"><i class="fas fa-comment-dots"><\\/i>'+commentBadge+'</button>';
         if (isAdmin) {
-          if (todo.status === 'reported') {
-            html += '<button onclick="approveTodo('+todo.id+')" class="p-1 text-green-500 text-sm animate-pulse"><i class="fas fa-check-double"><\\/i></button>';
+          if (todo.status !== 'completed') {
+            html += '<button onclick="approveTodo('+todo.id+')" class="p-1 text-green-500 text-sm" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
+          }
+        } else {
+          if (!isCompleted) {
+            html += '<button onclick="showMobileStatusMenu('+todo.id+', \x27'+todo.status+'\x27, event)" class="p-1 text-blue-500 text-sm" title="\uc0c1\ud0dc \ubcc0\uacbd"><i class="fas fa-exchange-alt"><\\/i></button>';
           }
         }
         html += '<button onclick="editTodo('+todo.id+')" class="p-1 text-gray-400 text-sm"><i class="fas fa-pen"><\\/i></button>';
@@ -1248,9 +1256,49 @@ function getIndexHTML(): string {
     }
 
     async function approveTodo(id) {
-      if (!confirm('\uc774 \uc5c5\ubb34\ub97c \ud655\uc778 \uc644\ub8cc \ucc98\ub9ac\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
+      if (!confirm('\uc774 \uc5c5\ubb34\ub97c \ucd5c\uc885 \ub9c8\uac10 \ucc98\ub9ac\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
       await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: true, status: 'completed' }) });
       loadTodos(); loadStats();
+    }
+
+    // ===== Mobile Status Menu for Regular Users =====
+    function showMobileStatusMenu(todoId, currentStatus, event) {
+      event.stopPropagation();
+      // Remove existing menu
+      const existingMenu = document.getElementById('mobileStatusMenu');
+      if (existingMenu) existingMenu.remove();
+
+      const statuses = ['working', 'reported', 'hold'];
+      const labels = { working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', hold: '\ubcf4\ub958' };
+      const colors = { working: 'bg-blue-100 text-blue-800', reported: 'bg-purple-100 text-purple-800', hold: 'bg-orange-100 text-orange-700' };
+
+      const menu = document.createElement('div');
+      menu.id = 'mobileStatusMenu';
+      menu.className = 'fixed z-[100] bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-gray-200 dark:border-slate-600 py-1 scale-in';
+      menu.style.minWidth = '120px';
+
+      statuses.forEach(s => {
+        const item = document.createElement('button');
+        item.className = 'w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 ' + (s === currentStatus ? 'font-bold' : '');
+        item.innerHTML = '<span class="inline-block px-2 py-0.5 rounded-full text-xs ' + colors[s] + '">' + labels[s] + '</span>' + (s === currentStatus ? ' <i class="fas fa-check text-mint-500"><\/i>' : '');
+        item.onclick = () => { menu.remove(); updateStatus(todoId, s); };
+        menu.appendChild(item);
+      });
+
+      document.body.appendChild(menu);
+      // Position near the button
+      const rect = event.target.closest('button').getBoundingClientRect();
+      menu.style.top = (rect.bottom + 4) + 'px';
+      menu.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - 140)) + 'px';
+
+      // Close on outside click
+      setTimeout(() => {
+        document.addEventListener('click', function closeMenu() {
+          const m = document.getElementById('mobileStatusMenu');
+          if (m) m.remove();
+          document.removeEventListener('click', closeMenu);
+        }, { once: true });
+      }, 50);
     }
 
     // ===== Inline Editing =====
