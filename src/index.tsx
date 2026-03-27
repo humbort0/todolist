@@ -419,16 +419,16 @@ app.get('/api/stats', async (c) => {
   const sharingWeekly = await c.env.DB.prepare(
     "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1 AND created_at >= date('now', 'weekday 1', '-7 days')"
   ).first()
-  const latestSharing = await c.env.DB.prepare(
-    'SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1'
-  ).first()
+  const latestSharings = await c.env.DB.prepare(
+    'SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5'
+  ).all()
 
   return c.json({
     total: total?.count || 0,
     inProgress: inProgress?.count || 0,
     waitingApproval: waitingApproval?.count || 0,
     sharingWeeklyCount: sharingWeekly?.count || 0,
-    sharingLatest: latestSharing?.content || ''
+    sharingLatestList: (latestSharings?.results || []).map((r: any) => r.content)
   })
 })
 
@@ -708,21 +708,20 @@ function getIndexHTML(): string {
           <p class="text-sm text-gray-500 dark:text-gray-400">\uad00\ubcf4\uace0(\uc644)</p>
         </div>
         <!-- Sharing Message Card -->
-        <div onclick="toggleSharingPanel()" id="card-sharing" class="bg-blue-50 border border-blue-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4 cursor-pointer">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-2">
-              <div class="w-8 h-8 sm:w-10 sm:h-10 bg-blue-200 rounded-xl flex items-center justify-center">
-                <i class="fas fa-bullhorn text-blue-700 text-sm sm:text-base"></i>
+        <div onclick="toggleSharingPanel()" id="card-sharing" class="bg-blue-50 border border-blue-100 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4 cursor-pointer flex flex-col">
+          <div class="flex items-center justify-between mb-1.5 sm:mb-2">
+            <div class="flex items-center gap-1.5">
+              <div class="w-7 h-7 sm:w-8 sm:h-8 bg-blue-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-bullhorn text-blue-700 text-xs sm:text-sm"></i>
               </div>
-              <span class="text-xs text-blue-600 font-medium bg-blue-100 px-2 py-0.5 rounded-full dark:bg-slate-700 dark:text-blue-400">Sharing</span>
+              <span class="text-xs text-blue-600 font-semibold dark:text-blue-400">Sharing</span>
             </div>
-            <div id="sharingWeeklyBadge" class="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/40 px-2 py-1 rounded-full">
+            <div id="sharingWeeklyBadge" class="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded-full">
               <i class="fas fa-comment-dots text-blue-500 text-xs"></i>
               <span id="sharingWeeklyCount" class="text-xs font-bold text-blue-700 dark:text-blue-300">0</span>
             </div>
           </div>
-          <p id="sharingLatestMsg" class="text-xs sm:text-sm md:text-base font-medium text-gray-700 dark:text-gray-200 leading-snug sm:leading-relaxed line-clamp-2 sm:line-clamp-3" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"></p>
-          <p class="text-xs text-blue-400 mt-1 hidden sm:block"><i class="fas fa-hand-pointer mr-1"></i>클릭하여 전체 보기</p>
+          <div id="sharingLatestMsg" class="flex-1 overflow-hidden space-y-0.5 sm:space-y-1"></div>
         </div>
       </div>
 
@@ -926,8 +925,8 @@ function getIndexHTML(): string {
           <i class="fas fa-bullhorn text-blue-500 mr-2"></i>Sharing Message 관리
         </h3>
         <!-- New Message Form -->
-        <div class="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-100 dark:bg-slate-700 dark:border-slate-600">
-          <h4 class="font-semibold text-sm text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-plus-circle mr-1 text-blue-500"></i>새 메시지 작성</h4>
+        <div id="sharingFormSection" class="mb-4 p-4 bg-blue-50 rounded-xl border border-blue-100 dark:bg-slate-700 dark:border-slate-600">
+          <h4 id="sharingFormTitle" class="font-semibold text-sm text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-plus-circle mr-1 text-blue-500"></i>새 메시지 작성</h4>
           <textarea id="sharingContent" rows="3" placeholder="공유할 메시지를 입력하세요..." class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-2 dark:bg-slate-600 dark:border-slate-500 dark:text-white"></textarea>
           <div class="grid grid-cols-2 gap-2 mb-2">
             <div>
@@ -939,9 +938,15 @@ function getIndexHTML(): string {
               <input id="sharingNote" type="text" placeholder="참고사항..." class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm dark:bg-slate-600 dark:border-slate-500 dark:text-white">
             </div>
           </div>
-          <button onclick="saveSharing()" class="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
-            <i class="fas fa-paper-plane mr-1"></i>등록
-          </button>
+          <div class="flex gap-2">
+            <button onclick="saveSharing()" id="sharingSubmitBtn" class="flex-1 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+              <i class="fas fa-paper-plane mr-1"></i>등록
+            </button>
+            <button onclick="cancelEditSharing()" id="sharingCancelBtn" class="hidden bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+              <i class="fas fa-times mr-1"></i>취소
+            </button>
+          </div>
+          <input type="hidden" id="editSharingId" value="">
         </div>
         <!-- Existing Messages List -->
         <div>
@@ -1220,11 +1225,18 @@ function getIndexHTML(): string {
       document.getElementById('statTotal').textContent = stats.total;
       document.getElementById('statInProgress').textContent = stats.inProgress;
       document.getElementById('statWaiting').textContent = stats.waitingApproval;
-      // Sharing Message 카드 업데이트
+      // Sharing Message 카드 업데이트 (개조식 ● 리스트)
       document.getElementById('sharingWeeklyCount').textContent = stats.sharingWeeklyCount || 0;
       const latestEl = document.getElementById('sharingLatestMsg');
       if (latestEl) {
-        latestEl.textContent = stats.sharingLatest || '공유 메시지가 없습니다.';
+        const msgs = stats.sharingLatestList || [];
+        if (msgs.length === 0) {
+          latestEl.innerHTML = '<p class="text-xs text-gray-400 dark:text-gray-500">\uacf5\uc720 \uba54\uc2dc\uc9c0\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.</p>';
+        } else {
+          latestEl.innerHTML = msgs.map(function(msg) {
+            return '<p class="text-xs sm:text-sm text-gray-700 dark:text-gray-200 leading-snug truncate"><span class="text-blue-400 mr-1">\u25cf</span>' + msg + '</p>';
+          }).join('');
+        }
       }
     }
 
@@ -1876,9 +1888,7 @@ function getIndexHTML(): string {
     // Sharing Management Modal
     function showSharingModal() {
       document.getElementById('sharingModal').classList.remove('hidden');
-      document.getElementById('sharingContent').value = '';
-      document.getElementById('sharingDueDate').value = '';
-      document.getElementById('sharingNote').value = '';
+      cancelEditSharing();
       renderSharingMgmtList();
     }
     function closeSharingModal() { document.getElementById('sharingModal').classList.add('hidden'); }
@@ -1888,18 +1898,54 @@ function getIndexHTML(): string {
       if (!content) { alert('메시지를 입력해 주세요.'); return; }
       const due_date = document.getElementById('sharingDueDate').value || null;
       const note = document.getElementById('sharingNote').value.trim();
-      await fetch('/api/sharing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, due_date, note })
-      });
-      document.getElementById('sharingContent').value = '';
-      document.getElementById('sharingDueDate').value = '';
-      document.getElementById('sharingNote').value = '';
+      const editId = document.getElementById('editSharingId').value;
+
+      if (editId) {
+        // 수정 모드
+        await fetch('/api/sharing/' + editId, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, due_date, note })
+        });
+      } else {
+        // 신규 등록
+        await fetch('/api/sharing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, due_date, note })
+        });
+      }
+      cancelEditSharing();
       await loadSharingMessages();
       renderSharingMgmtList();
       if (sharingPanelOpen) renderSharingList();
       loadStats();
+    }
+
+    function startEditSharing(id) {
+      const msg = sharingData.find(function(m) { return m.id === id; });
+      if (!msg) return;
+      document.getElementById('editSharingId').value = id;
+      document.getElementById('sharingContent').value = msg.content;
+      document.getElementById('sharingDueDate').value = msg.due_date || '';
+      document.getElementById('sharingNote').value = msg.note || '';
+      document.getElementById('sharingFormTitle').innerHTML = '<i class="fas fa-edit mr-1 text-orange-500"></i>메시지 수정';
+      document.getElementById('sharingSubmitBtn').innerHTML = '<i class="fas fa-save mr-1"></i>수정 저장';
+      document.getElementById('sharingSubmitBtn').className = 'flex-1 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition';
+      document.getElementById('sharingCancelBtn').classList.remove('hidden');
+      document.getElementById('sharingContent').focus();
+      document.getElementById('sharingFormSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function cancelEditSharing() {
+      document.getElementById('editSharingId').value = '';
+      document.getElementById('sharingContent').value = '';
+      document.getElementById('sharingDueDate').value = '';
+      document.getElementById('sharingNote').value = '';
+      document.getElementById('sharingFormTitle').innerHTML = '<i class="fas fa-plus-circle mr-1 text-blue-500"></i>새 메시지 작성';
+      document.getElementById('sharingSubmitBtn').innerHTML = '<i class="fas fa-paper-plane mr-1"></i>등록';
+      document.getElementById('sharingSubmitBtn').className = 'flex-1 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition';
+      document.getElementById('sharingCancelBtn').classList.add('hidden');
     }
 
     async function deleteSharing(id) {
@@ -1926,8 +1972,10 @@ function getIndexHTML(): string {
           (m.due_date ? '<span class="text-xs ' + dueDateClass + '"><i class="fas fa-calendar-alt mr-0.5"><\/i>' + m.due_date + '</span>' : '') +
           (m.note ? '<span class="text-xs text-gray-400"><i class="fas fa-sticky-note mr-0.5"><\/i>' + m.note + '</span>' : '') +
           '</div></div>' +
-          '<button onclick="deleteSharing(' + m.id + ')" class="text-red-400 hover:text-red-600 text-sm flex-shrink-0"><i class="fas fa-trash"><\/i></button>' +
-          '</div>';
+          '<div class="flex items-center gap-1 flex-shrink-0">' +
+          '<button onclick="startEditSharing(' + m.id + ')" class="text-blue-400 hover:text-blue-600 text-sm p-1" title="수정"><i class="fas fa-pen"><\/i></button>' +
+          '<button onclick="deleteSharing(' + m.id + ')" class="text-red-400 hover:text-red-600 text-sm p-1" title="삭제"><i class="fas fa-trash"><\/i></button>' +
+          '</div></div>';
       }).join('');
     }
 
