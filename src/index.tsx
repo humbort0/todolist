@@ -487,6 +487,12 @@ function getIndexHTML(): string {
     .teacher-card.active * { color: white !important; }
     .dark .teacher-card.active { background: #0d9488 !important; border-color: #0f766e !important; }
     .sort-btn.active { background: #14b8a6; color: white; border-color: #0d9488; }
+    .comment-badge-unread { background: #fce4ec !important; color: #e91e63 !important; border: 1px solid #f8bbd0; }
+    .comment-badge-read { background: #f3f4f6 !important; color: #9ca3af !important; }
+    .dark .comment-badge-unread { background: #4a1942 !important; color: #f48fb1 !important; border-color: #880e4f; }
+    .dark .comment-badge-read { background: #374151 !important; color: #6b7280 !important; }
+    .comment-btn-unread { color: #e91e63 !important; }
+    .comment-btn-unread i { color: #e91e63 !important; }
     .drag-handle { cursor: grab; }
     .drag-handle:active { cursor: grabbing; }
     .drag-over { border: 2px dashed #14b8a6 !important; background: #f0fdfa !important; }
@@ -640,43 +646,39 @@ function getIndexHTML(): string {
 
       <!-- Teacher Cards -->
       <div id="teacherCardsSection" class="mb-4 fade-in">
-        <div id="teacherCards" class="grid grid-cols-3 lg:grid-cols-6 gap-2"></div>
+        <div id="teacherCards" class="grid gap-2"></div>
       </div>
 
       <!-- Filter & Action Bar -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6 dark:bg-slate-800 dark:border-slate-700 fade-in">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3">
+          <div class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto">
             <!-- Period Filter -->
-            <div class="flex bg-gray-100 rounded-lg p-1 dark:bg-slate-700">
-              <button onclick="setPeriod('all')" id="periodAll" class="px-3 py-1.5 rounded-md text-sm font-medium transition-all bg-mint-500 text-white">\uc804\uccb4</button>
-              <button onclick="setPeriod('day')" id="periodDay" class="px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\ub2f9\uc77c</button>
-              <button onclick="setPeriod('week')" id="periodWeek" class="px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\uc8fc\ubcc4</button>
-              <button onclick="setPeriod('month')" id="periodMonth" class="px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\uc6d4\ubcc4</button>
+            <div class="flex bg-gray-100 rounded-lg p-1 dark:bg-slate-700 w-full sm:w-auto">
+              <button onclick="setPeriod('all')" id="periodAll" class="flex-1 sm:flex-none px-3 py-1.5 rounded-md text-sm font-medium transition-all bg-mint-500 text-white">\uc804\uccb4</button>
+              <button onclick="setPeriod('day')" id="periodDay" class="flex-1 sm:flex-none px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\ub2f9\uc77c</button>
+              <button onclick="setPeriod('week')" id="periodWeek" class="flex-1 sm:flex-none px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\uc8fc\ubcc4</button>
+              <button onclick="setPeriod('month')" id="periodMonth" class="flex-1 sm:flex-none px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\uc6d4\ubcc4</button>
             </div>
             <!-- Sort Toggle -->
-            <div class="flex bg-gray-100 rounded-lg p-1 dark:bg-slate-700">
-              <button onclick="setSortBy('due_date')" id="sortDueDate" class="sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all active">\ub9c8\uac10\uc77c\uc21c</button>
-              <button onclick="setSortBy('created')" id="sortCreated" class="sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\ub4f1\ub85d\uc21c</button>
+            <div class="flex bg-gray-100 rounded-lg p-1 dark:bg-slate-700 w-full sm:w-auto">
+              <button onclick="setSortBy('due_date')" id="sortDueDate" class="sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all active">\ub9c8\uac10\uc77c\uc21c</button>
+              <button onclick="setSortBy('created')" id="sortCreated" class="sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\ub4f1\ub85d\uc21c</button>
             </div>
             <!-- Category Filter -->
-            <select id="filterCategory" onchange="loadTodos()" class="px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+            <select id="filterCategory" onchange="loadTodos()" class="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white">
               <option value="">\ubaa8\ub4e0 \uc5c5\ubb34\uad6c\ubd84</option>
             </select>
           </div>
-          <div class="flex items-center gap-2">
-            <button onclick="exportExcel()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
-              <i class="fas fa-file-excel mr-1"></i>
-              <span class="hidden sm:inline">\uc5d1\uc140</span>
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <button onclick="exportExcel()" class="flex-1 sm:flex-none bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+              <i class="fas fa-file-excel mr-1"></i>\uc5d1\uc140
             </button>
-            <button id="addTodoBtn" onclick="showAddTodoModal()" class="bg-mint-500 hover:bg-mint-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
-              <i class="fas fa-plus mr-1"></i>
-              <span class="hidden sm:inline">\ud560 \uc77c \ucd94\uac00</span>
-              <span class="sm:hidden">\ucd94\uac00</span>
+            <button id="addTodoBtn" onclick="showAddTodoModal()" class="flex-1 sm:flex-none bg-mint-500 hover:bg-mint-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+              <i class="fas fa-plus mr-1"></i>\ud560 \uc77c \ucd94\uac00
             </button>
-            <button id="adminMgmtBtn" onclick="showAdminPanel()" class="hidden bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
-              <i class="fas fa-users-cog mr-1"></i>
-              <span class="hidden sm:inline">\uad00\ub9ac</span>
+            <button id="adminMgmtBtn" onclick="showAdminPanel()" class="hidden flex-1 sm:flex-none bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm">
+              <i class="fas fa-users-cog mr-1"></i>\uad00\ub9ac
             </button>
           </div>
         </div>
@@ -863,6 +865,16 @@ function getIndexHTML(): string {
     let currentSortBy = 'due_date';
     let selectedTeacherId = '';
     let activeCardFilter = null;
+    let readComments = JSON.parse(localStorage.getItem('tdl_readComments') || '{}');
+    function markCommentsRead(todoId, count) {
+      readComments[todoId] = count;
+      localStorage.setItem('tdl_readComments', JSON.stringify(readComments));
+    }
+    function isUnread(todo) {
+      if (!todo.comment_count || todo.comment_count === 0) return false;
+      const lastRead = readComments[todo.id];
+      return lastRead === undefined || lastRead < todo.comment_count;
+    }
 
     // ===== Auth =====
     function handleLogin() {
@@ -998,8 +1010,8 @@ function getIndexHTML(): string {
       ['All','Day','Week','Month'].forEach(k => {
         const btn = document.getElementById('period' + k);
         btn.className = k.toLowerCase() === p
-          ? 'px-3 py-1.5 rounded-md text-sm font-medium transition-all bg-mint-500 text-white'
-          : 'px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300';
+          ? 'flex-1 sm:flex-none px-3 py-1.5 rounded-md text-sm font-medium transition-all bg-mint-500 text-white'
+          : 'flex-1 sm:flex-none px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300';
       });
       loadTodos();
     }
@@ -1116,7 +1128,7 @@ function getIndexHTML(): string {
       todosData.forEach((todo, idx) => {
         const catColor = todo.category_color || '#5EEAD4';
         const isPrivate = todo.is_private;
-        const commentBadge = todo.comment_count > 0 ? '<span class="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-mint-100 text-mint-700 text-xs font-bold dark:bg-mint-900 dark:text-mint-200">' + todo.comment_count + '</span>' : '';
+        // comment badge now generated inline with read/unread state
         const isCompleted = todo.status === 'completed';
         const isDisabled = isCompleted;
         const delay = Math.min(idx * 0.04, 0.5);
@@ -1144,7 +1156,11 @@ function getIndexHTML(): string {
         
         // Actions
         html += '<div class="col-span-2 flex items-center justify-end gap-1">';
-        html += '<button onclick="showComments('+todo.id+')" class="p-1.5 text-gray-400 hover:text-mint-600 transition relative" title="\ud1a1"><i class="fas fa-comment-dots"><\\/i>'+commentBadge+'</button>';
+        const unread = isUnread(todo);
+        const commentBtnClass = unread ? 'p-1.5 comment-btn-unread hover:text-pink-700 transition relative' : 'p-1.5 text-gray-400 hover:text-mint-600 transition relative';
+        const commentBadgeClass = unread ? 'ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full comment-badge-unread text-xs font-bold' : 'ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full comment-badge-read text-xs font-bold';
+        const styledCommentBadge = todo.comment_count > 0 ? '<span class="'+commentBadgeClass+'">' + todo.comment_count + '</span>' : '';
+        html += '<button onclick="showComments('+todo.id+')" class="'+commentBtnClass+'" title="\ud1a1"><i class="fas fa-comment-dots"><\\/i>'+styledCommentBadge+'</button>';
         
         if (isAdmin) {
           html += '<button onclick="togglePrivate('+todo.id+', '+(!isPrivate)+')" class="p-1.5 '+(isPrivate ? 'text-yellow-500' : 'text-gray-400')+' hover:text-yellow-600 transition" title="\ube44\uacf5\uac1c"><i class="fas '+(isPrivate ? 'fa-lock' : 'fa-lock-open')+'"><\\/i></button>';
@@ -1174,7 +1190,10 @@ function getIndexHTML(): string {
         html += getStatusBadge(todo);
         html += '</div>';
         html += '<div class="flex items-center gap-1">';
-        html += '<button onclick="showComments('+todo.id+')" class="p-1 text-gray-400 hover:text-mint-600 text-sm"><i class="fas fa-comment-dots"><\\/i>'+commentBadge+'</button>';
+        const mobileUnread = isUnread(todo);
+        const mobileCommentBtnClass = mobileUnread ? 'p-1 comment-btn-unread hover:text-pink-700 text-sm' : 'p-1 text-gray-400 hover:text-mint-600 text-sm';
+        const mobileCommentBadge = todo.comment_count > 0 ? '<span class="'+(mobileUnread ? 'ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full comment-badge-unread text-xs font-bold' : 'ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full comment-badge-read text-xs font-bold')+'">' + todo.comment_count + '</span>' : '';
+        html += '<button onclick="showComments('+todo.id+')" class="'+mobileCommentBtnClass+'"><i class="fas fa-comment-dots"><\\/i>'+mobileCommentBadge+'</button>';
         if (isAdmin) {
           if (todo.status !== 'completed') {
             html += '<button onclick="approveTodo('+todo.id+')" class="p-1 text-green-500 text-sm" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
@@ -1391,6 +1410,8 @@ function getIndexHTML(): string {
         }).join('');
         container.scrollTop = container.scrollHeight;
       }
+      markCommentsRead(todoId, comments.length);
+      renderTodos();
     }
 
     function closeCommentModal() {
@@ -1588,15 +1609,29 @@ function getIndexHTML(): string {
     // ===== Teacher Cards =====
     function renderTeacherCards() {
       const container = document.getElementById('teacherCards');
+      const total = teachersData.length + 1; // +1 for '전체'
+      // Dynamic grid: PC row, mobile adapts
+      let pcCols, mobileCols;
+      if (total <= 4) { pcCols = total; mobileCols = total; }
+      else if (total <= 6) { pcCols = total; mobileCols = 3; }
+      else if (total <= 8) { pcCols = total; mobileCols = 4; }
+      else if (total <= 10) { pcCols = 10; mobileCols = 5; }
+      else { pcCols = Math.min(total, 12); mobileCols = Math.min(Math.ceil(total/2), 6); }
+      container.className = 'grid gap-2';
+      container.style.gridTemplateColumns = 'repeat('+mobileCols+', 1fr)';
+      // Add media query via inline style hack using CSS class
+      container.setAttribute('data-pc-cols', pcCols);
+      // We'll handle responsive via a style tag
+      let styleEl = document.getElementById('teacherGridStyle');
+      if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = 'teacherGridStyle'; document.head.appendChild(styleEl); }
+      styleEl.textContent = '#teacherCards { grid-template-columns: repeat('+mobileCols+', 1fr); } @media(min-width:1024px){ #teacherCards { grid-template-columns: repeat('+pcCols+', 1fr); } }';
       let html = '';
       html += '<div onclick="selectTeacher(&quot;&quot;)" class="teacher-card rounded-xl border px-3 py-2 text-center '+(selectedTeacherId===''?'active':'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-600')+'">';
-      html += '<i class="fas fa-users text-xs mb-0.5"><\\/i>';
       html += '<div class="text-xs font-semibold truncate">\uc804\uccb4</div>';
       html += '</div>';
       teachersData.forEach(t => {
         const isAct = selectedTeacherId == t.id;
         html += '<div onclick="selectTeacher(&quot;'+t.id+'&quot;)" class="teacher-card rounded-xl border px-3 py-2 text-center '+(isAct?'active':'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-600')+'">';
-        html += '<i class="fas fa-user text-xs mb-0.5 '+(isAct?'':'text-mint-500')+'"><\\/i>';
         html += '<div class="text-xs font-semibold truncate '+(isAct?'':'text-gray-700 dark:text-gray-200')+'">'+t.name+'</div>';
         html += '</div>';
       });
@@ -1612,8 +1647,8 @@ function getIndexHTML(): string {
     // ===== Sort Toggle =====
     function setSortBy(sort) {
       currentSortBy = sort;
-      document.getElementById('sortDueDate').className = 'sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'due_date' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
-      document.getElementById('sortCreated').className = 'sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'created' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      document.getElementById('sortDueDate').className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'due_date' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      document.getElementById('sortCreated').className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'created' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
       loadTodos();
     }
 
