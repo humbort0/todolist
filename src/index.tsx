@@ -16,8 +16,10 @@ async function ensureDB(db: D1Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       is_active INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`),
+    db.prepare(`UPDATE teachers SET sort_order = id WHERE sort_order = 0 OR sort_order IS NULL`),
     db.prepare(`CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
@@ -86,7 +88,7 @@ app.post('/api/auth/admin', async (c) => {
 // ===== Teachers API =====
 app.get('/api/teachers', async (c) => {
   await ensureDB(c.env.DB)
-  const { results } = await c.env.DB.prepare('SELECT * FROM teachers WHERE is_active = 1 ORDER BY name').all()
+  const { results } = await c.env.DB.prepare('SELECT * FROM teachers WHERE is_active = 1 ORDER BY sort_order ASC, id ASC').all()
   return c.json(results)
 })
 
@@ -100,6 +102,16 @@ app.post('/api/teachers', async (c) => {
 app.delete('/api/teachers/:id', async (c) => {
   const id = c.req.param('id')
   await c.env.DB.prepare('UPDATE teachers SET is_active = 0 WHERE id = ?').bind(id).run()
+  return c.json({ success: true })
+})
+
+app.put('/api/teachers/reorder', async (c) => {
+  const { order } = await c.req.json()
+  await ensureDB(c.env.DB)
+  const stmts = order.map((id: number, idx: number) =>
+    c.env.DB.prepare('UPDATE teachers SET sort_order = ? WHERE id = ?').bind(idx, id)
+  )
+  await c.env.DB.batch(stmts)
   return c.json({ success: true })
 })
 
@@ -228,7 +240,12 @@ app.get('/api/todos', async (c) => {
     query += " AND t.due_date BETWEEN date('now') AND date('now', '+30 days')"
   }
 
-  query += ' ORDER BY t.due_date ASC, t.created_at DESC'
+  const sortBy = c.req.query('sort') || 'due_date'
+  if (sortBy === 'created') {
+    query += ' ORDER BY t.created_at DESC, t.status ASC'
+  } else {
+    query += ' ORDER BY t.due_date ASC, t.status ASC, t.created_at DESC'
+  }
 
   let stmt = c.env.DB.prepare(query)
   if (bindings.length > 0) {
@@ -464,6 +481,15 @@ function getIndexHTML(): string {
     @keyframes cardDetail { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
     .progress-compact { max-width: 66%; min-width: 50px; }
     .count-anim { transition: all 0.3s ease; }
+    .teacher-card { transition: all 0.2s ease; cursor: pointer; }
+    .teacher-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .teacher-card.active { background: #14b8a6 !important; color: white !important; border-color: #0d9488 !important; }
+    .teacher-card.active * { color: white !important; }
+    .dark .teacher-card.active { background: #0d9488 !important; border-color: #0f766e !important; }
+    .sort-btn.active { background: #14b8a6; color: white; border-color: #0d9488; }
+    .drag-handle { cursor: grab; }
+    .drag-handle:active { cursor: grabbing; }
+    .drag-over { border: 2px dashed #14b8a6 !important; background: #f0fdfa !important; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen transition-colors duration-300">
@@ -612,6 +638,11 @@ function getIndexHTML(): string {
         <div id="cardDetailList" class="divide-y divide-gray-50 dark:divide-slate-700 max-h-72 overflow-y-auto"></div>
       </div>
 
+      <!-- Teacher Cards -->
+      <div id="teacherCardsSection" class="mb-4 fade-in">
+        <div id="teacherCards" class="grid grid-cols-3 lg:grid-cols-6 gap-2"></div>
+      </div>
+
       <!-- Filter & Action Bar -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6 dark:bg-slate-800 dark:border-slate-700 fade-in">
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -623,10 +654,11 @@ function getIndexHTML(): string {
               <button onclick="setPeriod('week')" id="periodWeek" class="px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\uc8fc\ubcc4</button>
               <button onclick="setPeriod('month')" id="periodMonth" class="px-3 py-1.5 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\uc6d4\ubcc4</button>
             </div>
-            <!-- Teacher Filter -->
-            <select id="filterTeacher" onchange="loadTodos()" class="px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white">
-              <option value="">\ubaa8\ub4e0 \ub2f4\ub2f9\uc790</option>
-            </select>
+            <!-- Sort Toggle -->
+            <div class="flex bg-gray-100 rounded-lg p-1 dark:bg-slate-700">
+              <button onclick="setSortBy('due_date')" id="sortDueDate" class="sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all active">\ub9c8\uac10\uc77c\uc21c</button>
+              <button onclick="setSortBy('created')" id="sortCreated" class="sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\ub4f1\ub85d\uc21c</button>
+            </div>
             <!-- Category Filter -->
             <select id="filterCategory" onchange="loadTodos()" class="px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white">
               <option value="">\ubaa8\ub4e0 \uc5c5\ubb34\uad6c\ubd84</option>
@@ -828,6 +860,8 @@ function getIndexHTML(): string {
     let frequentPhrases = [];
     let completedFilterActive = false;
     let currentStatusFilter = '';
+    let currentSortBy = 'due_date';
+    let selectedTeacherId = '';
     let activeCardFilter = null;
 
     // ===== Auth =====
@@ -974,12 +1008,10 @@ function getIndexHTML(): string {
     async function loadTeachers() {
       const res = await fetch('/api/teachers');
       teachersData = await res.json();
-      const filterSelect = document.getElementById('filterTeacher');
-      filterSelect.innerHTML = '<option value="">\ubaa8\ub4e0 \ub2f4\ub2f9\uc790</option>';
-      teachersData.forEach(t => { filterSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>'; });
       const todoSelect = document.getElementById('todoTeacher');
       todoSelect.innerHTML = '<option value="">\uc120\ud0dd</option>';
       teachersData.forEach(t => { todoSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>'; });
+      renderTeacherCards();
     }
 
     async function loadCategories() {
@@ -1001,7 +1033,7 @@ function getIndexHTML(): string {
     async function loadTodos() {
       const isAdmin = currentRole === 'admin';
       const search = document.getElementById('searchInput').value;
-      const teacherId = document.getElementById('filterTeacher').value;
+      const teacherId = selectedTeacherId;
       const categoryId = document.getElementById('filterCategory').value;
       
       const params = new URLSearchParams({
@@ -1010,7 +1042,8 @@ function getIndexHTML(): string {
         search: search,
         teacher_id: teacherId,
         category_id: categoryId,
-        status: currentStatusFilter
+        status: currentStatusFilter,
+        sort: currentSortBy
       });
 
       const res = await fetch('/api/todos?' + params);
@@ -1490,11 +1523,28 @@ function getIndexHTML(): string {
     }
 
     function renderAdminTeachers() {
-      document.getElementById('teacherList').innerHTML = teachersData.map(t =>
-        '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg">' +
-        '<span class="text-sm text-gray-700 dark:text-gray-200"><i class="fas fa-user text-mint-500 mr-2"><\\/i>' + t.name + '</span>' +
+      document.getElementById('teacherList').innerHTML = teachersData.map((t, idx) =>
+        '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg" draggable="true" data-teacher-id="'+t.id+'" ondragstart="onTeacherDragStart(event, '+idx+')" ondragover="onTeacherDragOver(event)" ondrop="onTeacherDrop(event, '+idx+')" ondragend="onTeacherDragEnd(event)">' +
+        '<div class="flex items-center gap-2"><i class="fas fa-grip-vertical text-gray-400 drag-handle"><\\/i><span class="text-sm text-gray-700 dark:text-gray-200"><i class="fas fa-user text-mint-500 mr-1"><\\/i>' + t.name + '</span></div>' +
         '<button onclick="deleteTeacher('+t.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"><\\/i></button></div>'
       ).join('');
+    }
+
+    let dragTeacherIdx = null;
+    function onTeacherDragStart(e, idx) { dragTeacherIdx = idx; e.target.style.opacity = '0.5'; }
+    function onTeacherDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+    function onTeacherDragEnd(e) { e.target.style.opacity = '1'; document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); }
+    async function onTeacherDrop(e, dropIdx) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      if (dragTeacherIdx === null || dragTeacherIdx === dropIdx) return;
+      const item = teachersData.splice(dragTeacherIdx, 1)[0];
+      teachersData.splice(dropIdx, 0, item);
+      dragTeacherIdx = null;
+      renderAdminTeachers();
+      const order = teachersData.map(t => t.id);
+      await fetch('/api/teachers/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
+      renderTeacherCards();
     }
 
     function renderAdminCategories() {
@@ -1533,6 +1583,38 @@ function getIndexHTML(): string {
       if (!confirm('\uc0ad\uc81c\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
       await fetch('/api/categories/' + id, { method: 'DELETE' });
       await loadCategories(); renderAdminCategories();
+    }
+
+    // ===== Teacher Cards =====
+    function renderTeacherCards() {
+      const container = document.getElementById('teacherCards');
+      let html = '';
+      html += '<div onclick="selectTeacher(&quot;&quot;)" class="teacher-card rounded-xl border px-3 py-2 text-center '+(selectedTeacherId===''?'active':'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-600')+'">';
+      html += '<i class="fas fa-users text-xs mb-0.5"><\\/i>';
+      html += '<div class="text-xs font-semibold truncate">\uc804\uccb4</div>';
+      html += '</div>';
+      teachersData.forEach(t => {
+        const isAct = selectedTeacherId == t.id;
+        html += '<div onclick="selectTeacher(&quot;'+t.id+'&quot;)" class="teacher-card rounded-xl border px-3 py-2 text-center '+(isAct?'active':'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-600')+'">';
+        html += '<i class="fas fa-user text-xs mb-0.5 '+(isAct?'':'text-mint-500')+'"><\\/i>';
+        html += '<div class="text-xs font-semibold truncate '+(isAct?'':'text-gray-700 dark:text-gray-200')+'">'+t.name+'</div>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function selectTeacher(id) {
+      selectedTeacherId = id;
+      renderTeacherCards();
+      loadTodos();
+    }
+
+    // ===== Sort Toggle =====
+    function setSortBy(sort) {
+      currentSortBy = sort;
+      document.getElementById('sortDueDate').className = 'sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'due_date' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      document.getElementById('sortCreated').className = 'sort-btn px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'created' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      loadTodos();
     }
 
     // ===== Excel Export =====
