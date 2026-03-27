@@ -665,6 +665,10 @@ function getIndexHTML(): string {
               <button onclick="setSortBy('due_date')" id="sortDueDate" class="sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all active">\ub9c8\uac10\uc77c\uc21c</button>
               <button onclick="setSortBy('created')" id="sortCreated" class="sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-600 hover:text-gray-800 dark:text-gray-300">\ub4f1\ub85d\uc21c</button>
             </div>
+            <!-- Teacher Filter (Dropdown) -->
+            <select id="filterTeacher" onchange="onTeacherDropdownChange()" class="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white">
+              <option value="">\ubaa8\ub4e0 \ub2f4\ub2f9\uc790</option>
+            </select>
             <!-- Category Filter -->
             <select id="filterCategory" onchange="loadTodos()" class="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm dark:bg-slate-700 dark:border-slate-600 dark:text-white">
               <option value="">\ubaa8\ub4e0 \uc5c5\ubb34\uad6c\ubd84</option>
@@ -1023,6 +1027,13 @@ function getIndexHTML(): string {
       const todoSelect = document.getElementById('todoTeacher');
       todoSelect.innerHTML = '<option value="">\uc120\ud0dd</option>';
       teachersData.forEach(t => { todoSelect.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>'; });
+      // 필터 드롭다운도 업데이트
+      const filterTeacher = document.getElementById('filterTeacher');
+      if (filterTeacher) {
+        filterTeacher.innerHTML = '<option value="">\ubaa8\ub4e0 \ub2f4\ub2f9\uc790</option>';
+        teachersData.forEach(t => { filterTeacher.innerHTML += '<option value="'+t.id+'">'+t.name+'</option>'; });
+        filterTeacher.value = selectedTeacherId;
+      }
       renderTeacherCards();
     }
 
@@ -1410,11 +1421,20 @@ function getIndexHTML(): string {
         }).join('');
         container.scrollTop = container.scrollHeight;
       }
-      markCommentsRead(todoId, comments.length);
+      // 읽음 처리는 closeCommentModal에서 수행
       renderTodos();
     }
 
     function closeCommentModal() {
+      // 창을 닫을 때 현재 보고 있던 댓글을 읽음 처리
+      const todoId = document.getElementById('commentTodoId').value;
+      if (todoId) {
+        const todo = todosData.find(t => t.id == todoId);
+        if (todo) {
+          markCommentsRead(todoId, todo.comment_count);
+          renderTodos();
+        }
+      }
       document.getElementById('commentModal').classList.add('hidden');
       document.getElementById('phraseSuggestions').classList.add('hidden');
     }
@@ -1640,6 +1660,16 @@ function getIndexHTML(): string {
 
     function selectTeacher(id) {
       selectedTeacherId = id;
+      renderTeacherCards();
+      // 드롭다운과 카드 동기화
+      const filterTeacher = document.getElementById('filterTeacher');
+      if (filterTeacher) filterTeacher.value = id;
+      loadTodos();
+    }
+
+    function onTeacherDropdownChange() {
+      const val = document.getElementById('filterTeacher').value;
+      selectedTeacherId = val;
       renderTeacherCards();
       loadTodos();
     }
