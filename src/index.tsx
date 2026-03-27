@@ -879,10 +879,8 @@ function getIndexHTML(): string {
         <h3 class="text-lg font-bold text-gray-800 mb-6 dark:text-white">
           <i class="fas fa-users-cog text-yellow-500 mr-2"></i>\uad00\ub9ac\uc790 \ud328\ub110
         </h3>
-        
-        </div>
 
-        <div class="grid md:grid-cols-2 gap-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <h4 class="font-semibold text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-users mr-2 text-mint-500"></i>\ubd80\uc11c\uc6d0 \uad00\ub9ac</h4>
             <div class="flex gap-2 mb-3">
