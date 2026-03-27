@@ -238,6 +238,9 @@ app.get('/api/todos', async (c) => {
     } else if (statusFilter === 'hold') {
       query += " AND t.status = 'hold'"
     }
+  } else {
+    // 기본: completed 제외 (마감완료 버튼으로만 볼 수 있음)
+    query += " AND t.status != 'completed'"
   }
 
   if (period === 'day') {
@@ -639,7 +642,7 @@ function getIndexHTML(): string {
             </button>
             <!-- Completed Filter Button (마감 완료) -->
             <button id="completedFilterBtn" onclick="toggleCompletedFilter()" class="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs sm:text-sm font-medium transition flex items-center gap-1" data-tip="\ub9c8\uac10 \uc644\ub8cc \ud56d\ubaa9\ub9cc \ubcf4\uae30">
-              <i class="fas fa-check-circle"></i>
+              <i class="fas fa-clipboard-check"></i>
               <span class="hidden sm:inline">\ub9c8\uac10 \uc644\ub8cc</span>
             </button>
             <!-- Dark Mode -->
