@@ -861,15 +861,6 @@ function getIndexHTML(): string {
 
       <!-- Todo List -->
       <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden dark:bg-slate-800 dark:border-slate-700">
-        <div class="hidden md:grid grid-cols-12 gap-2 px-6 py-3 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider dark:bg-slate-900 dark:border-slate-700 dark:text-gray-400">
-          <div class="col-span-1">\uad6c\ubd84</div>
-          <div class="col-span-3">\uc5c5\ubb34\uba85</div>
-          <div class="col-span-1">\ub2f4\ub2f9\uc790</div>
-          <div class="col-span-1">\uae30\ud55c</div>
-          <div class="col-span-3">\uc9c4\ud589\ub960</div>
-          <div class="col-span-1">\uc0c1\ud0dc</div>
-          <div class="col-span-2 text-right">\uc791\uc5c5</div>
-        </div>
         <div id="todoList" class="divide-y divide-gray-50 dark:divide-slate-700">
           <div class="p-8 text-center text-gray-400">
             <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
@@ -960,6 +951,7 @@ function getIndexHTML(): string {
               <button onclick="addTeacher()" class="bg-mint-500 text-white px-3 py-2 rounded-lg text-sm hover:bg-mint-600 transition"><i class="fas fa-plus"></i></button>
             </div>
             <div id="teacherList" class="space-y-2 max-h-48 overflow-y-auto"></div>
+            <button onclick="saveTeacherOrder()" id="btnSaveTeacherOrder" class="mt-3 w-full bg-mint-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-mint-600 transition flex items-center justify-center gap-2"><i class="fas fa-save"></i>\uc21c\uc11c \uc800\uc7a5</button>
           </div>
           <div>
             <h4 class="font-semibold text-gray-700 mb-3 dark:text-gray-200"><i class="fas fa-tags mr-2 text-mint-500"></i>\uc5c5\ubb34 \uad6c\ubd84 \uad00\ub9ac</h4>
@@ -1454,7 +1446,7 @@ function getIndexHTML(): string {
           // Regular user: status selector
           if (!isCompleted) {
             html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" style="max-width:90px;">';
-            ['received','planning','working','reported','post_working','hold'].forEach(s => {
+            ['received','planning','working','reported','post_working','completed','hold'].forEach(s => {
               html += '<option value="'+s+'"'+((todo.status===s)?' selected':'')+'>'+getStatusLabel(s)+'</option>';
             });
             html += '</select>';
@@ -1656,8 +1648,8 @@ function getIndexHTML(): string {
     }
 
     async function updateStatus(id, status) {
-      // 담당자는 completed 선택 불가 (관리자 승인만 가능)
-      if (status === 'completed' && currentRole !== 'admin') return;
+
+
       const progress = statusToProgress(status);
       await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, progress }) });
       loadTodos(); loadStats();
@@ -1681,9 +1673,9 @@ function getIndexHTML(): string {
       const existingMenu = document.getElementById('mobileStatusMenu');
       if (existingMenu) existingMenu.remove();
 
-      const statuses = ['received', 'planning', 'working', 'reported', 'post_working', 'hold'];
-      const labels = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', hold: '\ubcf4\ub958' };
-      const colors = { received: 'bg-violet-100 text-violet-700', planning: 'bg-green-100 text-green-700', working: 'bg-blue-100 text-blue-700', reported: 'bg-orange-100 text-orange-700', post_working: 'bg-yellow-100 text-yellow-700', hold: 'bg-gray-200 text-gray-600' };
+      const statuses = ['received', 'planning', 'working', 'reported', 'post_working', 'completed', 'hold'];
+      const labels = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\uc644\ub8cc', hold: '\ubcf4\ub958' };
+      const colors = { received: 'bg-violet-100 text-violet-700', planning: 'bg-green-100 text-green-700', working: 'bg-blue-100 text-blue-700', reported: 'bg-orange-100 text-orange-700', post_working: 'bg-yellow-100 text-yellow-700', completed: 'bg-red-100 text-red-700', hold: 'bg-gray-200 text-gray-600' };
 
       const menu = document.createElement('div');
       menu.id = 'mobileStatusMenu';
@@ -1952,12 +1944,24 @@ function getIndexHTML(): string {
       dragTeacherIdx = null;
       renderAdminTeachers();
       const order = teachersData.map(t => t.id);
+      await saveTeacherOrderToServer(order);
+      renderTeacherCards();
+    }
+
+    async function saveTeacherOrderToServer(order) {
       const res = await fetch('/api/teachers/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
       if (res.ok) {
         var listEl = document.getElementById('teacherList');
         if (listEl) { listEl.style.transition = 'background 0.3s'; listEl.style.background = '#d1fae5'; setTimeout(function() { listEl.style.background = ''; }, 800); }
         showToast('\uc21c\uc11c\uac00 \uc800\uc7a5\ub418\uc5c8\uc2b5\ub2c8\ub2e4', 'success');
+      } else {
+        showToast('\uc21c\uc11c \uc800\uc7a5 \uc2e4\ud328', 'error');
       }
+    }
+
+    async function saveTeacherOrder() {
+      const order = teachersData.map(t => t.id);
+      await saveTeacherOrderToServer(order);
       renderTeacherCards();
     }
 
