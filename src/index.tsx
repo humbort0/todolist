@@ -16,10 +16,10 @@ async function ensureDB(db: D1Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       is_active INTEGER DEFAULT 1,
-      sort_order INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`),
-    db.prepare(`UPDATE teachers SET sort_order = id WHERE sort_order = 0 OR sort_order IS NULL`),
+    db.prepare(`UPDATE teachers SET sort_order = id WHERE sort_order IS NULL`),
     db.prepare(`CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
@@ -103,7 +103,9 @@ app.get('/api/teachers', async (c) => {
 app.post('/api/teachers', async (c) => {
   const { name } = await c.req.json()
   await ensureDB(c.env.DB)
-  const result = await c.env.DB.prepare('INSERT INTO teachers (name) VALUES (?)').bind(name).run()
+  const maxOrder = await c.env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) as max_order FROM teachers WHERE is_active = 1').first()
+  const newOrder = (maxOrder?.max_order || 0) + 1
+  const result = await c.env.DB.prepare('INSERT INTO teachers (name, sort_order) VALUES (?, ?)').bind(name, newOrder).run()
   return c.json({ id: result.meta.last_row_id, name })
 })
 
@@ -117,7 +119,7 @@ app.put('/api/teachers/reorder', async (c) => {
     }
     await ensureDB(c.env.DB)
     for (let i = 0; i < order.length; i++) {
-      await c.env.DB.prepare('UPDATE teachers SET sort_order = ? WHERE id = ?').bind(i, order[i]).run()
+      await c.env.DB.prepare('UPDATE teachers SET sort_order = ? WHERE id = ?').bind(i + 1, order[i]).run()
     }
     return c.json({ success: true })
   } catch (e: any) {
