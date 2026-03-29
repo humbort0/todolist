@@ -1301,7 +1301,7 @@ function getIndexHTML(): string {
       if (progress <= 60) return '\uc791\uc5c5\uc911';
       if (progress <= 70) return '\uad00\ubcf4\uace0(\uc644)';
       if (progress < 100) return '\ud6c4\uc791\uc5c5\uc911';
-      return '\uad00\ubcf4\uace0(\uc644)';  // 100%도 관보고(완) 표시
+      return '\uc644\ub8cc';
     }
 
     function getDueDateClass(dueDate) {
@@ -1441,7 +1441,7 @@ function getIndexHTML(): string {
       if (p <= 60) return { thumb: '#93c5fd', track: '#93c5fd', label: '\uc791\uc5c5\uc911' };
       if (p <= 70) return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0(\uc644)' };
       if (p < 100) return { thumb: '#fde68a', track: '#fde68a', label: '\ud6c4\uc791\uc5c5\uc911' };
-      return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0(\uc644)' };  // 100% = 관보고(완)
+      return { thumb: '#fca5a5', track: '#fca5a5', label: '\uc644\ub8cc' };  // 100% = 완료 (파스텔 레드)
     }
 
     function getSliderLabels(progress) {
@@ -1451,7 +1451,7 @@ function getIndexHTML(): string {
         { label: '\uc791\uc5c5\uc911', max: 60 },
         { label: '\uad00\ubcf4\uace0', max: 70 },
         { label: '\ud6c4\uc791\uc5c5', max: 99 },
-        { label: '\uad00\ubcf4\uace0', max: 100 }
+        { label: '\uc644\ub8cc', max: 100 }
       ];
       var p = parseInt(progress);
       var prevMax = -1;
