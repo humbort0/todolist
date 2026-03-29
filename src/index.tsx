@@ -248,8 +248,8 @@ app.get('/api/todos', async (c) => {
       query += " AND t.status = '" + statusFilter + "'"
     }
   } else {
-    // 기본: completed 제외 (마감완료 버튼으로만 볼 수 있음)
-    query += " AND t.status NOT IN ('completed', 'approved')"
+    // 기본: approved(마감완료)만 제외, completed(완료)는 목록에 유지
+    query += " AND t.status != 'approved'"
   }
 
   if (period === 'day') {
