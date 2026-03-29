@@ -229,14 +229,8 @@ app.get('/api/todos', async (c) => {
   }
 
   if (statusFilter) {
-    if (statusFilter === 'completed') {
-      query += " AND t.status = 'completed'"
-    } else if (statusFilter === 'working') {
-      query += " AND t.status = 'working'"
-    } else if (statusFilter === 'reported') {
-      query += " AND t.status = 'reported'"
-    } else if (statusFilter === 'hold') {
-      query += " AND t.status = 'hold'"
+    if (['completed','working','reported','hold','received','planning','post_working'].includes(statusFilter)) {
+      query += " AND t.status = '" + statusFilter + "'"
     }
   } else {
     // 기본: completed 제외 (마감완료 버튼으로만 볼 수 있음)
@@ -412,7 +406,7 @@ app.get('/api/stats', async (c) => {
 
   let whereClause = isAdmin ? '' : 'WHERE is_private = 0'
 
-  const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'working'`).first()
+  const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status IN ('received','planning','working','post_working')`).first()
   const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'reported'`).first()
   const holdCount = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'hold'`).first()
 
@@ -1229,19 +1223,37 @@ function getIndexHTML(): string {
 
     // ===== Status Helpers =====
     function getStatusLabel(status) {
-      const map = { completed: '\uc644\ub8cc', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', hold: '\ubcf4\ub958' };
-      return map[status] || '\uc791\uc5c5\uc911';
+      const map = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', post_working: '\ud6c4\uc791\uc5c5\uc911', completed: '\uc644\ub8cc', hold: '\ubcf4\ub958' };
+      return map[status] || '\uc218\uc2e0';
+    }
+
+    function progressToStatus(p) {
+      p = parseInt(p);
+      if (p <= 15) return 'received';
+      if (p <= 30) return 'planning';
+      if (p <= 60) return 'working';
+      if (p <= 70) return 'reported';
+      if (p < 100) return 'post_working';
+      return 'completed';
+    }
+
+    function statusToProgress(s) {
+      const map = { received: 0, planning: 16, working: 31, reported: 61, post_working: 71, completed: 100 };
+      return map[s] !== undefined ? map[s] : 0;
     }
 
     function getStatusBadge(todo, pcMode) {
-      const s = todo.status || 'working';
+      const s = todo.status || 'received';
       const colors = {
-        completed: { bg: 'bg-green-100 dark:bg-green-900', text: 'text-green-800 dark:text-green-200', dot: 'bg-green-500', icon: 'fa-check-circle', label: '\uc644\ub8cc' },
+        received: { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300', dot: 'bg-gray-400', icon: 'fa-inbox', label: '\uc218\uc2e0' },
+        planning: { bg: 'bg-cyan-100 dark:bg-cyan-900', text: 'text-cyan-700 dark:text-cyan-200', dot: 'bg-cyan-500', icon: 'fa-lightbulb', label: '\uad6c\uc0c1' },
+        working: { bg: 'bg-blue-100 dark:bg-blue-900', text: 'text-blue-800 dark:text-blue-200', dot: 'bg-blue-500', icon: 'fa-spinner', label: '\uc791\uc5c5\uc911' },
         reported: { bg: 'bg-purple-100 dark:bg-purple-900', text: 'text-purple-800 dark:text-purple-200', dot: 'bg-purple-500', icon: 'fa-flag', label: '\uad00\ubcf4\uace0(\uc644)' },
-        hold: { bg: 'bg-orange-100 dark:bg-orange-900', text: 'text-orange-700 dark:text-orange-200', dot: 'bg-orange-500', icon: 'fa-pause-circle', label: '\ubcf4\ub958' },
-        working: { bg: 'bg-blue-100 dark:bg-blue-900', text: 'text-blue-800 dark:text-blue-200', dot: 'bg-blue-500', icon: 'fa-spinner', label: '\uc791\uc5c5\uc911' }
+        post_working: { bg: 'bg-indigo-100 dark:bg-indigo-900', text: 'text-indigo-700 dark:text-indigo-200', dot: 'bg-indigo-500', icon: 'fa-tools', label: '\ud6c4\uc791\uc5c5\uc911' },
+        completed: { bg: 'bg-green-100 dark:bg-green-900', text: 'text-green-800 dark:text-green-200', dot: 'bg-green-500', icon: 'fa-check-circle', label: '\uc644\ub8cc' },
+        hold: { bg: 'bg-orange-100 dark:bg-orange-900', text: 'text-orange-700 dark:text-orange-200', dot: 'bg-orange-500', icon: 'fa-pause-circle', label: '\ubcf4\ub958' }
       };
-      const c = colors[s] || colors.working;
+      const c = colors[s] || colors.received;
       if (pcMode) {
         return '<span class="status-pill-pc group\/sp relative inline-flex items-center justify-center w-6 h-6 rounded-full ' + c.bg + ' cursor-pointer transition-all duration-200 hover:w-auto hover:px-2.5 hover:py-0.5">' +
           '<span class="w-2.5 h-2.5 rounded-full ' + c.dot + ' group-hover\/sp:hidden"></span>' +
@@ -1253,18 +1265,19 @@ function getIndexHTML(): string {
 
     function getProgressColor(p) {
       if (p === 100) return 'text-green-600 dark:text-green-400';
-      if (p >= 75) return 'text-mint-600 dark:text-mint-400';
-      if (p >= 50) return 'text-blue-600 dark:text-blue-400';
-      if (p >= 25) return 'text-yellow-600 dark:text-yellow-400';
+      if (p >= 71) return 'text-indigo-600 dark:text-indigo-400';
+      if (p >= 61) return 'text-purple-600 dark:text-purple-400';
+      if (p >= 31) return 'text-blue-600 dark:text-blue-400';
+      if (p >= 16) return 'text-cyan-600 dark:text-cyan-400';
       return 'text-gray-500 dark:text-gray-400';
     }
 
     function getProgressLabel(progress) {
-      if (progress === 0) return '\ubbf8\uc2dc\uc791';
-      if (progress <= 25) return '1\ub2e8\uacc4: \uc2dc\uc791';
-      if (progress <= 50) return '2\ub2e8\uacc4: \uc911\uac04';
-      if (progress <= 75) return '3\ub2e8\uacc4: \ubc1c\uc804';
-      if (progress < 100) return '4\ub2e8\uacc4: \ub9c8\ubb34\ub9ac';
+      if (progress <= 15) return '\uc218\uc2e0';
+      if (progress <= 30) return '\uad6c\uc0c1';
+      if (progress <= 60) return '\uc791\uc5c5\uc911';
+      if (progress <= 70) return '\uad00\ubcf4\uace0(\uc644)';
+      if (progress < 100) return '\ud6c4\uc791\uc5c5\uc911';
       return '\uc644\ub8cc';
     }
 
@@ -1310,13 +1323,14 @@ function getIndexHTML(): string {
         html += '<div class="col-span-1"><span class="text-sm text-gray-600 dark:text-gray-300">'+(todo.teacher_name||'-')+'</span></div>';
         html += '<div class="col-span-1"><span class="text-xs '+getDueDateClass(todo.due_date)+'">'+(todo.due_date || '-')+'</span></div>';
         
-        // Progress Slider (compact 2/3)
-        html += '<div class="col-span-3 flex items-center gap-2">';
-        html += '<div class="progress-compact flex-1"><input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' onchange="updateProgress('+todo.id+', this.value)" oninput="updateProgressDisplay(this)"></div>';
-        html += '<span class="text-xs font-bold w-10 text-right tabular-nums '+getProgressColor(todo.progress)+'">'+todo.progress+'%</span>';
+        // Progress Slider with status labels (col-span-4)
+        html += '<div class="col-span-4">';
+        html += '<div class="flex items-center gap-2">';
+        html += '<div class="progress-compact flex-1"><input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)"></div>';
+        html += getStatusBadge(todo, true);
         html += '</div>';
-        
-        html += '<div class="col-span-1">'+getStatusBadge(todo, true)+'</div>';
+        html += '<div class="flex justify-between mt-0.5 px-0.5" style="font-size:9px;color:#aaa;"><span>\uc218\uc2e0</span><span>\uad6c\uc0c1</span><span>\uc791\uc5c5\uc911</span><span>\uad00\ubcf4\uace0</span><span>\ud6c4\uc791\uc5c5</span><span>\uc644\ub8cc</span></div>';
+        html += '</div>';
         
         // Actions
         html += '<div class="col-span-2 flex items-center justify-end gap-1">';
@@ -1334,8 +1348,8 @@ function getIndexHTML(): string {
         } else {
           // Regular user: status selector
           if (!isCompleted) {
-            html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" style="max-width:85px;">';
-            ['working','reported','hold'].forEach(s => {
+            html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" style="max-width:90px;">';
+            ['received','planning','working','reported','post_working','hold'].forEach(s => {
               html += '<option value="'+s+'"'+((todo.status===s)?' selected':'')+'>'+getStatusLabel(s)+'</option>';
             });
             html += '</select>';
@@ -1375,29 +1389,32 @@ function getIndexHTML(): string {
         html += '<span><i class="fas fa-user mr-1"><\\/i>'+(todo.teacher_name||'-')+'</span>';
         html += '<span class="'+getDueDateClass(todo.due_date)+'"><i class="fas fa-calendar mr-1"><\\/i>'+(todo.due_date||'\uae30\ud55c \uc5c6\uc74c')+'</span>';
         html += '</div>';
-        html += '<div class="flex items-center gap-2 mb-1">';
-        html += '<div class="progress-compact flex-1"><input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' onchange="updateProgress('+todo.id+', this.value)" oninput="updateProgressDisplay(this)"></div>';
-        html += '<span class="text-xs font-bold w-10 text-right tabular-nums '+getProgressColor(todo.progress)+'">'+todo.progress+'%</span>';
+        html += '<div class="mb-1">';
+        html += '<div class="flex items-center gap-2">';
+        html += '<div class="progress-compact flex-1"><input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)"></div>';
+        html += getStatusBadge(todo);
         html += '</div>';
-        html += '<div class="text-xs text-gray-400">'+getProgressLabel(todo.progress)+'</div>';
+        html += '<div class="flex justify-between mt-0.5 px-0.5" style="font-size:8px;color:#aaa;"><span>\uc218\uc2e0</span><span>\uad6c\uc0c1</span><span>\uc791\uc5c5\uc911</span><span>\uad00\ubcf4\uace0</span><span>\ud6c4\uc791\uc5c5</span><span>\uc644\ub8cc</span></div>';
+        html += '</div>';
         html += '</div>';
       });
 
       container.innerHTML = html;
     }
 
-    // ===== Progress Display Update (real-time) =====
-    function updateProgressDisplay(slider) {
-      const span = slider.closest('.flex').querySelector('span');
-      if (!span) return;
-      span.textContent = slider.value + '%';
+    // ===== Slider Input Handler (real-time status sync) =====
+    function onSliderInput(slider) {
       const v = parseInt(slider.value);
-      const base = 'text-xs font-bold w-10 text-right tabular-nums ';
-      if (v === 100) { span.className = base + 'text-green-600 dark:text-green-400'; }
-      else if (v >= 75) { span.className = base + 'text-mint-600 dark:text-mint-400'; }
-      else if (v >= 50) { span.className = base + 'text-blue-600 dark:text-blue-400'; }
-      else if (v >= 25) { span.className = base + 'text-yellow-600 dark:text-yellow-400'; }
-      else { span.className = base + 'text-gray-500 dark:text-gray-400'; }
+      const newStatus = progressToStatus(v);
+      // Update the status badge next to the slider
+      const wrapper = slider.closest('.flex');
+      if (!wrapper) return;
+      const badge = wrapper.querySelector('.status-pill-pc, .inline-flex');
+      if (badge) {
+        const tempTodo = { status: newStatus };
+        const isPc = !!badge.classList.contains('status-pill-pc');
+        badge.outerHTML = getStatusBadge(tempTodo, isPc);
+      }
     }
 
     // ===== CRUD =====
@@ -1455,14 +1472,15 @@ function getIndexHTML(): string {
 
     async function updateProgress(id, value) {
       const v = parseInt(value);
-      const updates = { progress: v };
-      if (v === 100) { updates.status = 'reported'; }
+      const newStatus = progressToStatus(v);
+      const updates = { progress: v, status: newStatus };
       await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
       loadTodos(); loadStats();
     }
 
     async function updateStatus(id, status) {
-      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      const progress = statusToProgress(status);
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, progress }) });
       loadTodos(); loadStats();
     }
 
@@ -1473,7 +1491,7 @@ function getIndexHTML(): string {
 
     async function approveTodo(id) {
       if (!confirm('\uc774 \uc5c5\ubb34\ub97c \ucd5c\uc885 \ub9c8\uac10 \ucc98\ub9ac\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
-      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: true, status: 'completed' }) });
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: true, status: 'completed', progress: 100 }) });
       loadTodos(); loadStats();
     }
 
@@ -1484,9 +1502,9 @@ function getIndexHTML(): string {
       const existingMenu = document.getElementById('mobileStatusMenu');
       if (existingMenu) existingMenu.remove();
 
-      const statuses = ['working', 'reported', 'hold'];
-      const labels = { working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', hold: '\ubcf4\ub958' };
-      const colors = { working: 'bg-blue-100 text-blue-800', reported: 'bg-purple-100 text-purple-800', hold: 'bg-orange-100 text-orange-700' };
+      const statuses = ['received', 'planning', 'working', 'reported', 'post_working', 'hold'];
+      const labels = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', post_working: '\ud6c4\uc791\uc5c5\uc911', hold: '\ubcf4\ub958' };
+      const colors = { received: 'bg-gray-100 text-gray-700', planning: 'bg-cyan-100 text-cyan-700', working: 'bg-blue-100 text-blue-800', reported: 'bg-purple-100 text-purple-800', post_working: 'bg-indigo-100 text-indigo-700', hold: 'bg-orange-100 text-orange-700' };
 
       const menu = document.createElement('div');
       menu.id = 'mobileStatusMenu';
