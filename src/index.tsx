@@ -1330,7 +1330,7 @@ function getIndexHTML(): string {
         const isPrivate = todo.is_private;
         // comment badge now generated inline with read/unread state
         const isCompleted = todo.status === 'completed';
-        const isDisabled = isCompleted;
+        const isDisabled = isCompleted && !isAdmin;  // 관리자는 완료 상태도 슬라이더 조작 가능
         const delay = Math.min(idx * 0.04, 0.5);
 
         // Desktop Row
