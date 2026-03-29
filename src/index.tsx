@@ -410,24 +410,29 @@ app.get('/api/sharing/latest', async (c) => {
 app.get('/api/stats', async (c) => {
   await ensureDB(c.env.DB)
   const isAdmin = c.req.query('admin') === 'true'
+  const wc = isAdmin ? '' : 'WHERE is_private = 0'
+  const and = wc ? wc + ' AND' : 'WHERE'
 
-  let whereClause = isAdmin ? '' : 'WHERE is_private = 0'
-
-  const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status IN ('received','planning','working','post_working')`).first()
-  const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'reported'`).first()
-  const holdCount = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'hold'`).first()
-
-  const sharingTotal = await c.env.DB.prepare(
-    "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1"
-  ).first()
-  const latestSharings = await c.env.DB.prepare(
-    'SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5'
-  ).all()
+  const [holdR, receivedR, planningR, workingR, reportedR, postWorkR, completedR, sharingTotal, latestSharings] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'hold'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'received'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'planning'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'working'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'reported'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'post_working'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'completed'`).first(),
+    c.env.DB.prepare("SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1").first(),
+    c.env.DB.prepare('SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5').all()
+  ])
 
   return c.json({
-    inProgress: inProgress?.count || 0,
-    waitingApproval: waitingApproval?.count || 0,
-    holdCount: holdCount?.count || 0,
+    holdCount: holdR?.count || 0,
+    receivedCount: receivedR?.count || 0,
+    planningCount: planningR?.count || 0,
+    workingCount: workingR?.count || 0,
+    reportedCount: reportedR?.count || 0,
+    postWorkCount: postWorkR?.count || 0,
+    completedCount: completedR?.count || 0,
     sharingTotalCount: sharingTotal?.count || 0,
     sharingLatestList: (latestSharings?.results || []).map((r: any) => r.content)
   })
@@ -688,44 +693,86 @@ function getIndexHTML(): string {
     <!-- Dashboard Content -->
     <div class="max-w-7xl mx-auto px-4 py-6">
       
-      <!-- Summary Cards (3 cards + motto card) -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div onclick="openCardDetail('hold')" id="card-hold" class="bg-yellow-50 border border-yellow-200 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-1">
-          <div class="flex items-center justify-between mb-3">
-            <div class="w-10 h-10 bg-yellow-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-pause-circle text-yellow-700"></i>
+      <!-- Summary Cards: 8 cards (PC: 4x2, Mobile: 4-3-1) -->
+      <div class="grid grid-cols-4 gap-2 sm:gap-3 mb-2 sm:mb-3">
+        <div onclick="openCardDetail('hold')" id="card-hold" class="bg-gray-50 border border-gray-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-1 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-gray-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-pause-circle text-gray-600 text-sm"></i>
             </div>
-            <span class="text-xs text-yellow-700 font-medium bg-yellow-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-yellow-400">\ubcf4\ub958</span>
+            <span class="text-[10px] text-gray-600 font-medium bg-gray-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-gray-400">\ubcf4\ub958</span>
           </div>
-          <p id="statHold" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">\ubcf4\ub958 \ud56d\ubaa9</p>
+          <p id="statHold" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\ubcf4\ub958</p>
         </div>
-        <div onclick="openCardDetail('working')" id="card-working" class="bg-peach-50 border border-orange-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-2">
-          <div class="flex items-center justify-between mb-3">
-            <div class="w-10 h-10 bg-orange-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-spinner text-orange-700"></i>
+        <div onclick="openCardDetail('received')" id="card-received" class="bg-violet-50 border border-violet-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-2 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-violet-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-inbox text-violet-600 text-sm"></i>
             </div>
-            <span class="text-xs text-orange-600 font-medium bg-orange-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-orange-400">\uc9c4\ud589</span>
+            <span class="text-[10px] text-violet-600 font-medium bg-violet-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-violet-400">\uc218\uc2e0</span>
           </div>
-          <p id="statInProgress" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">\uc791\uc5c5 \uc911</p>
+          <p id="statReceived" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\uc218\uc2e0</p>
         </div>
-        <div onclick="openCardDetail('reported')" id="card-reported" class="bg-orange-50 border border-orange-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-3">
-          <div class="flex items-center justify-between mb-3">
-            <div class="w-10 h-10 bg-orange-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-flag-checkered text-orange-600"></i>
+        <div onclick="openCardDetail('planning')" id="card-planning" class="bg-green-50 border border-green-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-3 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-green-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-lightbulb text-green-600 text-sm"></i>
             </div>
-            <span class="text-xs text-orange-600 font-medium bg-orange-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-orange-400">\ubcf4\uace0</span>
+            <span class="text-[10px] text-green-600 font-medium bg-green-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-green-400">\uad6c\uc0c1</span>
           </div>
-          <p id="statWaiting" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">\uad00\ubcf4\uace0</p>
+          <p id="statPlanning" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\uad6c\uc0c1</p>
         </div>
-        <!-- Sharing Message Card -->
-        <div onclick="toggleSharingPanel()" id="card-sharing" class="bg-blue-50 border border-blue-100 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4 cursor-pointer flex flex-col">
-          <div class="flex items-center justify-between mb-1.5 sm:mb-2">
+        <div onclick="openCardDetail('working')" id="card-working" class="bg-blue-50 border border-blue-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-blue-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-spinner text-blue-600 text-sm"></i>
+            </div>
+            <span class="text-[10px] text-blue-600 font-medium bg-blue-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-blue-400">\uc791\uc5c5\uc911</span>
+          </div>
+          <p id="statWorking" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\uc791\uc5c5\uc911</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 sm:grid-cols-4 gap-2 sm:gap-3 mb-2 sm:mb-3">
+        <div onclick="openCardDetail('reported')" id="card-reported" class="bg-orange-50 border border-orange-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-5 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-orange-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-flag text-orange-600 text-sm"></i>
+            </div>
+            <span class="text-[10px] text-orange-600 font-medium bg-orange-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-orange-400">\uad00\ubcf4\uace0</span>
+          </div>
+          <p id="statReported" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\uad00\ubcf4\uace0</p>
+        </div>
+        <div onclick="openCardDetail('post_working')" id="card-post_working" class="bg-yellow-50 border border-yellow-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-6 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-yellow-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-tools text-yellow-600 text-sm"></i>
+            </div>
+            <span class="text-[10px] text-yellow-600 font-medium bg-yellow-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-yellow-400">\ud6c4\uc791\uc5c5</span>
+          </div>
+          <p id="statPostWork" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\ud6c4\uc791\uc5c5</p>
+        </div>
+        <div onclick="openCardDetail('completed')" id="card-completed" class="bg-red-50 border border-red-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-7 cursor-pointer">
+          <div class="flex items-center justify-between mb-2">
+            <div class="w-8 h-8 bg-red-200 rounded-lg flex items-center justify-center">
+              <i class="fas fa-check-circle text-red-500 text-sm"></i>
+            </div>
+            <span class="text-[10px] text-red-500 font-medium bg-red-100 px-1.5 py-0.5 rounded-full dark:bg-slate-700 dark:text-red-400">\uc644\ub8cc</span>
+          </div>
+          <p id="statCompleted" class="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400">\uc644\ub8cc</p>
+        </div>
+        <!-- Sharing card: full-width on mobile (col-span), same size on PC -->
+        <div onclick="toggleSharingPanel()" id="card-sharing" class="col-span-3 sm:col-span-1 bg-blue-50 border border-blue-200 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-8 cursor-pointer flex flex-col">
+          <div class="flex items-center justify-between mb-1.5">
             <div class="flex items-center gap-1.5">
-              <div class="w-7 h-7 sm:w-8 sm:h-8 bg-blue-200 rounded-lg flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-bullhorn text-blue-700 text-xs sm:text-sm"></i>
+              <div class="w-8 h-8 bg-blue-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-bullhorn text-blue-600 text-sm"></i>
               </div>
               <span class="text-xs text-blue-600 font-semibold dark:text-blue-400">Sharing</span>
             </div>
@@ -734,7 +781,7 @@ function getIndexHTML(): string {
               <span id="sharingTotalCount" class="text-xs font-bold text-blue-700 dark:text-blue-300">0</span>
             </div>
           </div>
-          <div id="sharingLatestMsg" class="flex-1 overflow-hidden space-y-0.5 sm:space-y-1"></div>
+          <div id="sharingLatestMsg" class="flex-1 overflow-hidden space-y-0.5"></div>
         </div>
       </div>
 
@@ -1227,8 +1274,12 @@ function getIndexHTML(): string {
       const res = await fetch('/api/stats?admin=' + isAdmin);
       const stats = await res.json();
       document.getElementById('statHold').textContent = stats.holdCount;
-      document.getElementById('statInProgress').textContent = stats.inProgress;
-      document.getElementById('statWaiting').textContent = stats.waitingApproval;
+      document.getElementById('statReceived').textContent = stats.receivedCount;
+      document.getElementById('statPlanning').textContent = stats.planningCount;
+      document.getElementById('statWorking').textContent = stats.workingCount;
+      document.getElementById('statReported').textContent = stats.reportedCount;
+      document.getElementById('statPostWork').textContent = stats.postWorkCount;
+      document.getElementById('statCompleted').textContent = stats.completedCount;
       // Sharing Message 카드 업데이트 (개조식 ● 리스트)
       document.getElementById('sharingTotalCount').textContent = stats.sharingTotalCount || 0;
       const latestEl = document.getElementById('sharingLatestMsg');
@@ -1776,14 +1827,14 @@ function getIndexHTML(): string {
     async function openCardDetail(type) {
       if (activeCardFilter === type) { closeCardDetail(); return; }
       activeCardFilter = type;
-      ['hold','working','reported'].forEach(k => {
+      ['hold','received','planning','working','reported','post_working','completed'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.toggle('card-active', k === type);
       });
       const titleEl = document.getElementById('cardDetailTitle');
-      const titles = { hold: '\ubcf4\ub958 \ud56d\ubaa9', working: '\uc791\uc5c5 \uc911', reported: '\uad00\ubcf4\uace0' };
-      const icons = { hold: 'fa-pause-circle', working: 'fa-spinner', reported: 'fa-flag-checkered' };
-      titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\/i>' + titles[type] + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
+      const titles = { hold: '\ubcf4\ub958', received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\uc644\ub8cc' };
+      const icons = { hold: 'fa-pause-circle', received: 'fa-inbox', planning: 'fa-lightbulb', working: 'fa-spinner', reported: 'fa-flag', post_working: 'fa-tools', completed: 'fa-check-circle' };
+      titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\/i>' + (titles[type]||type) + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
 
       const isAdmin = currentRole === 'admin';
       const res = await fetch('/api/todos?admin=' + isAdmin + '&period=all&status=' + type);
@@ -1838,7 +1889,7 @@ function getIndexHTML(): string {
 
     function closeCardDetail() {
       activeCardFilter = null;
-      ['hold','working','reported'].forEach(k => {
+      ['hold','received','planning','working','reported','post_working','completed'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.remove('card-active');
       });
