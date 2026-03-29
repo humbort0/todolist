@@ -1249,7 +1249,7 @@ function getIndexHTML(): string {
       if (p <= 60) return 'working';
       if (p <= 70) return 'reported';
       if (p < 100) return 'post_working';
-      return 'completed';
+      return 'reported';  // 100%도 관보고(완) → 관리자 승인 후에만 completed
     }
 
     function statusToProgress(s) {
@@ -1293,7 +1293,7 @@ function getIndexHTML(): string {
       if (progress <= 60) return '\uc791\uc5c5\uc911';
       if (progress <= 70) return '\uad00\ubcf4\uace0(\uc644)';
       if (progress < 100) return '\ud6c4\uc791\uc5c5\uc911';
-      return '\uc644\ub8cc';
+      return '\uad00\ubcf4\uace0(\uc644)';  // 100%도 관보고(완) 표시
     }
 
     function getDueDateClass(dueDate) {
@@ -1433,7 +1433,7 @@ function getIndexHTML(): string {
       if (p <= 60) return { thumb: '#93c5fd', track: '#93c5fd', label: '\uc791\uc5c5\uc911' };
       if (p <= 70) return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0(\uc644)' };
       if (p < 100) return { thumb: '#fde68a', track: '#fde68a', label: '\ud6c4\uc791\uc5c5\uc911' };
-      return { thumb: '#fca5a5', track: '#fca5a5', label: '\uc644\ub8cc' };
+      return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0(\uc644)' };  // 100% = 관보고(완)
     }
 
     function getSliderLabels(progress) {
@@ -1443,7 +1443,7 @@ function getIndexHTML(): string {
         { label: '\uc791\uc5c5\uc911', max: 60 },
         { label: '\uad00\ubcf4\uace0', max: 70 },
         { label: '\ud6c4\uc791\uc5c5', max: 99 },
-        { label: '\uc644\ub8cc', max: 100 }
+        { label: '\uad00\ubcf4\uace0', max: 100 }
       ];
       var p = parseInt(progress);
       var prevMax = -1;
@@ -1562,13 +1562,15 @@ function getIndexHTML(): string {
 
     async function updateProgress(id, value) {
       const v = parseInt(value);
-      const newStatus = progressToStatus(v);
+      const newStatus = progressToStatus(v);  // 100% → reported (관보고 완)
       const updates = { progress: v, status: newStatus };
       await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
       loadTodos(); loadStats();
     }
 
     async function updateStatus(id, status) {
+      // 담당자는 completed 선택 불가 (관리자 승인만 가능)
+      if (status === 'completed' && currentRole !== 'admin') return;
       const progress = statusToProgress(status);
       await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, progress }) });
       loadTodos(); loadStats();
