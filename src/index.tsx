@@ -412,9 +412,9 @@ app.get('/api/stats', async (c) => {
 
   let whereClause = isAdmin ? '' : 'WHERE is_private = 0'
 
-  const total = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause}`).first()
   const inProgress = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'working'`).first()
   const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'reported'`).first()
+  const holdCount = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'hold'`).first()
 
   const sharingWeekly = await c.env.DB.prepare(
     "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1 AND created_at >= date('now', 'weekday 1', '-7 days')"
@@ -424,9 +424,9 @@ app.get('/api/stats', async (c) => {
   ).all()
 
   return c.json({
-    total: total?.count || 0,
     inProgress: inProgress?.count || 0,
     waitingApproval: waitingApproval?.count || 0,
+    holdCount: holdCount?.count || 0,
     sharingWeeklyCount: sharingWeekly?.count || 0,
     sharingLatestList: (latestSharings?.results || []).map((r: any) => r.content)
   })
@@ -507,7 +507,7 @@ function getIndexHTML(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To-Do-List | TDL</title>
+  <title>ToDoL</title>
   <script src="https://cdn.tailwindcss.com"><\/script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"><\/script>
@@ -584,10 +584,8 @@ function getIndexHTML(): string {
   <div id="loginScreen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-mint-100 to-mint-200">
     <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md mx-4 fade-in">
       <div class="text-center mb-8">
-        <div class="w-20 h-20 bg-mint-500 rounded-2xl flex items-center justify-center mx-auto mb-4 pulse-soft">
-          <i class="fas fa-clipboard-check text-white text-3xl"></i>
-        </div>
-        <h1 class="text-2xl font-bold text-gray-800">To-Do-List</h1>
+        <img src="/logo.png" alt="ToDoL" class="w-24 h-24 mx-auto mb-4 rounded-2xl object-cover pulse-soft">
+        <h1 class="text-2xl font-bold text-gray-800">ToDoL</h1>
         <p class="text-gray-500 mt-2 text-sm">\ubd80\uc11c \uc5c5\ubb34 \uad00\ub9ac \uc2dc\uc2a4\ud15c</p>
       </div>
       <div class="space-y-4">
@@ -612,12 +610,10 @@ function getIndexHTML(): string {
       <div class="max-w-7xl mx-auto px-4 py-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3">
-            <div class="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center">
-              <i class="fas fa-clipboard-check text-lg"></i>
-            </div>
+            <img src="/logo.png" alt="ToDoL" class="w-9 h-9 rounded-lg object-cover">
             <div>
               <h1 class="font-bold text-lg leading-tight">
-                <span class="hidden md:inline">To-Do-List</span>
+                <span class="hidden md:inline">ToDoL</span>
                 <span class="md:hidden">TDL</span>
               </h1>
               <p class="text-mint-100 text-xs hidden sm:block">\ubd80\uc11c \uc5c5\ubb34 \uad00\ub9ac</p>
@@ -1213,7 +1209,7 @@ function getIndexHTML(): string {
       const isAdmin = currentRole === 'admin';
       const res = await fetch('/api/stats?admin=' + isAdmin);
       const stats = await res.json();
-      document.getElementById('statTotal').textContent = stats.total;
+      document.getElementById('statHold').textContent = stats.holdCount;
       document.getElementById('statInProgress').textContent = stats.inProgress;
       document.getElementById('statWaiting').textContent = stats.waitingApproval;
       // Sharing Message 카드 업데이트 (개조식 ● 리스트)
@@ -1645,7 +1641,7 @@ function getIndexHTML(): string {
       if (activeCardFilter === type) { closeCardDetail(); return; }
       activeCardFilter = type;
       // Highlight active card
-      ['total','working','reported'].forEach(k => {
+      ['hold','working','reported'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.toggle('card-active', k === type);
       });
@@ -1659,7 +1655,7 @@ function getIndexHTML(): string {
 
       const isAdmin = currentRole === 'admin';
       let params = 'admin=' + isAdmin + '&period=all';
-      if (type !== 'total') params += '&status=' + type;
+      params += '&status=' + type;
       
       const res = await fetch('/api/todos?' + params);
       let items = await res.json();
@@ -1684,7 +1680,7 @@ function getIndexHTML(): string {
 
     function closeCardDetail() {
       activeCardFilter = null;
-      ['total','working','reported'].forEach(k => {
+      ['hold','working','reported'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.remove('card-active');
       });
