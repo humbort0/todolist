@@ -253,10 +253,22 @@ app.get('/api/todos', async (c) => {
   }
 
   const sortBy = c.req.query('sort') || 'due_date'
+  const sortDir = c.req.query('dir') || 'asc'
+  const dir = sortDir === 'desc' ? 'DESC' : 'ASC'
   if (sortBy === 'created') {
-    query += ' ORDER BY t.created_at DESC, t.status ASC'
+    query += ' ORDER BY t.created_at ' + dir + ', t.status ASC'
+  } else if (sortBy === 'category') {
+    query += ' ORDER BY c.name ' + dir + ', t.due_date ASC'
+  } else if (sortBy === 'title') {
+    query += ' ORDER BY t.title ' + dir + ', t.due_date ASC'
+  } else if (sortBy === 'teacher') {
+    query += ' ORDER BY te.name ' + dir + ', t.due_date ASC'
+  } else if (sortBy === 'progress') {
+    query += ' ORDER BY t.progress ' + dir + ', t.due_date ASC'
+  } else if (sortBy === 'status') {
+    query += " ORDER BY CASE t.status WHEN 'received' THEN 1 WHEN 'planning' THEN 2 WHEN 'working' THEN 3 WHEN 'reported' THEN 4 WHEN 'post_working' THEN 5 WHEN 'completed' THEN 6 WHEN 'hold' THEN 7 ELSE 8 END " + dir + ', t.due_date ASC'
   } else {
-    query += ' ORDER BY t.due_date ASC, t.status ASC, t.created_at DESC'
+    query += ' ORDER BY t.due_date ' + dir + ', t.status ASC, t.created_at DESC'
   }
 
   let stmt = c.env.DB.prepare(query)
@@ -1061,6 +1073,7 @@ function getIndexHTML(): string {
     let completedFilterActive = false;
     let currentStatusFilter = '';
     let currentSortBy = 'due_date';
+    let currentSortDir = 'asc';
     let selectedTeacherId = '';
     let activeCardFilter = null;
     let readComments = JSON.parse(localStorage.getItem('tdl_readComments') || '{}');
@@ -1261,7 +1274,8 @@ function getIndexHTML(): string {
         teacher_id: teacherId,
         category_id: categoryId,
         status: currentStatusFilter,
-        sort: currentSortBy
+        sort: currentSortBy,
+        dir: currentSortDir
       });
 
       const res = await fetch('/api/todos?' + params);
@@ -1380,6 +1394,16 @@ function getIndexHTML(): string {
       }
 
       let html = '';
+      // Desktop sortable column header
+      html += '<div class="hidden md:grid grid-cols-12 gap-2 px-6 py-2 bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 sticky top-0 z-10 select-none">';
+      html += '<div class="col-span-1 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-mint-600 flex items-center" onclick="setSortBy(\\x27category\\x27)">\uad6c\ubd84<span id="sort-icon-category">'+getSortIcon('category')+'</span></div>';
+      html += '<div class="col-span-3 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-mint-600 flex items-center" onclick="setSortBy(\\x27title\\x27)">\uc5c5\ubb34\uba85<span id="sort-icon-title">'+getSortIcon('title')+'</span></div>';
+      html += '<div class="col-span-1 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-mint-600 flex items-center" onclick="setSortBy(\\x27teacher\\x27)">\ub2f4\ub2f9\uc790<span id="sort-icon-teacher">'+getSortIcon('teacher')+'</span></div>';
+      html += '<div class="col-span-1 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-mint-600 flex items-center" onclick="setSortBy(\\x27due_date\\x27)">\uae30\ud55c<span id="sort-icon-due_date">'+getSortIcon('due_date')+'</span></div>';
+      html += '<div class="col-span-4 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer hover:text-mint-600 flex items-center" onclick="setSortBy(\\x27progress\\x27)">\uc9c4\ud589\ub960<span id="sort-icon-progress">'+getSortIcon('progress')+'</span></div>';
+      html += '<div class="col-span-2 text-xs font-semibold text-gray-500 dark:text-gray-400 text-right">\uc561\uc158</div>';
+      html += '</div>';
+
       todosData.forEach((todo, idx) => {
         const catColor = todo.category_color || '#5EEAD4';
         const isPrivate = todo.is_private;
@@ -1928,7 +1952,12 @@ function getIndexHTML(): string {
       dragTeacherIdx = null;
       renderAdminTeachers();
       const order = teachersData.map(t => t.id);
-      await fetch('/api/teachers/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
+      const res = await fetch('/api/teachers/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
+      if (res.ok) {
+        var listEl = document.getElementById('teacherList');
+        if (listEl) { listEl.style.transition = 'background 0.3s'; listEl.style.background = '#d1fae5'; setTimeout(function() { listEl.style.background = ''; }, 800); }
+        showToast('\uc21c\uc11c\uac00 \uc800\uc7a5\ub418\uc5c8\uc2b5\ub2c8\ub2e4', 'success');
+      }
       renderTeacherCards();
     }
 
@@ -2054,10 +2083,46 @@ function getIndexHTML(): string {
 
     // ===== Sort Toggle =====
     function setSortBy(sort) {
-      currentSortBy = sort;
-      document.getElementById('sortDueDate').className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'due_date' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
-      document.getElementById('sortCreated').className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'created' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      if (currentSortBy === sort) {
+        currentSortDir = (currentSortDir === 'asc') ? 'desc' : 'asc';
+      } else {
+        currentSortBy = sort;
+        currentSortDir = 'asc';
+      }
+      var sd = document.getElementById('sortDueDate');
+      var sc = document.getElementById('sortCreated');
+      if (sd) sd.className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'due_date' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      if (sc) sc.className = 'sort-btn flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-medium transition-all ' + (sort === 'created' ? 'active' : 'text-gray-600 hover:text-gray-800 dark:text-gray-300');
+      updateSortHeaders();
       loadTodos();
+    }
+
+    function getSortIcon(col) {
+      if (currentSortBy !== col) return '<i class="fas fa-sort text-gray-300 ml-1 text-[10px]"><\/i>';
+      return currentSortDir === 'asc'
+        ? '<i class="fas fa-sort-up text-mint-500 ml-1 text-[10px]"><\/i>'
+        : '<i class="fas fa-sort-down text-mint-500 ml-1 text-[10px]"><\/i>';
+    }
+
+    function updateSortHeaders() {
+      ['category','title','teacher','due_date','progress','status'].forEach(function(c) {
+        var el = document.getElementById('sort-icon-'+c);
+        if (el) el.innerHTML = getSortIcon(c);
+      });
+    }
+
+    // ===== Toast Notification =====
+    function showToast(msg, type) {
+      var existing = document.getElementById('toast-notify');
+      if (existing) existing.remove();
+      var t = document.createElement('div');
+      t.id = 'toast-notify';
+      var bg = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-gray-700';
+      t.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 ' + bg + ' text-white px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium z-[200] transition-all duration-300 opacity-0';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      requestAnimationFrame(function() { t.style.opacity = '1'; });
+      setTimeout(function() { t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 300); }, 2000);
     }
 
     // ===== Sharing Messages =====
