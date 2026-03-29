@@ -584,7 +584,7 @@ function getIndexHTML(): string {
   <div id="loginScreen" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-mint-100 to-mint-200">
     <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md mx-4 fade-in">
       <div class="text-center mb-8">
-        <img src="/logo.png" alt="ToDoL" class="w-24 h-24 mx-auto mb-4 rounded-2xl object-cover pulse-soft">
+        <img src="/static/logo.png" alt="ToDoL" class="w-24 h-24 mx-auto mb-4 rounded-2xl object-cover pulse-soft">
         <h1 class="text-2xl font-bold text-gray-800">ToDoL</h1>
         <p class="text-gray-500 mt-2 text-sm">\ubd80\uc11c \uc5c5\ubb34 \uad00\ub9ac \uc2dc\uc2a4\ud15c</p>
       </div>
@@ -610,7 +610,7 @@ function getIndexHTML(): string {
       <div class="max-w-7xl mx-auto px-4 py-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-3">
-            <img src="/logo.png" alt="ToDoL" class="w-9 h-9 rounded-lg object-cover">
+            <img src="/static/logo.png" alt="ToDoL" class="w-9 h-9 rounded-lg object-cover">
             <div>
               <h1 class="font-bold text-lg leading-tight">
                 <span class="hidden md:inline">ToDoL</span>
@@ -1233,12 +1233,22 @@ function getIndexHTML(): string {
       return map[status] || '\uc791\uc5c5\uc911';
     }
 
-    function getStatusBadge(todo) {
+    function getStatusBadge(todo, pcMode) {
       const s = todo.status || 'working';
-      if (s === 'completed') return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"><i class="fas fa-check-circle mr-1"><\\/i>\uc644\ub8cc</span>';
-      if (s === 'reported') return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"><i class="fas fa-flag mr-1"><\\/i>\uad00\ubcf4\uace0(\uc644)</span>';
-      if (s === 'hold') return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200"><i class="fas fa-pause-circle mr-1"><\\/i>\ubcf4\ub958</span>';
-      return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"><i class="fas fa-spinner mr-1"><\\/i>\uc791\uc5c5\uc911</span>';
+      const colors = {
+        completed: { bg: 'bg-green-100 dark:bg-green-900', text: 'text-green-800 dark:text-green-200', dot: 'bg-green-500', icon: 'fa-check-circle', label: '\uc644\ub8cc' },
+        reported: { bg: 'bg-purple-100 dark:bg-purple-900', text: 'text-purple-800 dark:text-purple-200', dot: 'bg-purple-500', icon: 'fa-flag', label: '\uad00\ubcf4\uace0(\uc644)' },
+        hold: { bg: 'bg-orange-100 dark:bg-orange-900', text: 'text-orange-700 dark:text-orange-200', dot: 'bg-orange-500', icon: 'fa-pause-circle', label: '\ubcf4\ub958' },
+        working: { bg: 'bg-blue-100 dark:bg-blue-900', text: 'text-blue-800 dark:text-blue-200', dot: 'bg-blue-500', icon: 'fa-spinner', label: '\uc791\uc5c5\uc911' }
+      };
+      const c = colors[s] || colors.working;
+      if (pcMode) {
+        return '<span class="status-pill-pc group\/sp relative inline-flex items-center justify-center w-6 h-6 rounded-full ' + c.bg + ' cursor-pointer transition-all duration-200 hover:w-auto hover:px-2.5 hover:py-0.5">' +
+          '<span class="w-2.5 h-2.5 rounded-full ' + c.dot + ' group-hover\/sp:hidden"></span>' +
+          '<span class="hidden group-hover\/sp:inline-flex items-center text-xs font-medium ' + c.text + ' whitespace-nowrap"><i class="fas ' + c.icon + ' mr-1"><\/i>' + c.label + '</span>' +
+        '</span>';
+      }
+      return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ' + c.bg + ' ' + c.text + '"><i class="fas ' + c.icon + ' mr-1"><\/i>' + c.label + '</span>';
     }
 
     function getProgressColor(p) {
@@ -1306,7 +1316,7 @@ function getIndexHTML(): string {
         html += '<span class="text-xs font-bold w-10 text-right tabular-nums '+getProgressColor(todo.progress)+'">'+todo.progress+'%</span>';
         html += '</div>';
         
-        html += '<div class="col-span-1">'+getStatusBadge(todo)+'</div>';
+        html += '<div class="col-span-1">'+getStatusBadge(todo, true)+'</div>';
         
         // Actions
         html += '<div class="col-span-2 flex items-center justify-end gap-1">';
@@ -1637,45 +1647,71 @@ function getIndexHTML(): string {
     }
 
     // ===== Card Detail =====
+    let cardDetailItems = [];
+    let cardDetailPage = 1;
+    const CARD_DETAIL_PER_PAGE = 10;
+
     async function openCardDetail(type) {
       if (activeCardFilter === type) { closeCardDetail(); return; }
       activeCardFilter = type;
-      // Highlight active card
       ['hold','working','reported'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.toggle('card-active', k === type);
       });
-      const panel = document.getElementById('cardDetailPanel');
       const titleEl = document.getElementById('cardDetailTitle');
-      const listEl = document.getElementById('cardDetailList');
-      
       const titles = { hold: '\ubcf4\ub958 \ud56d\ubaa9', working: '\uc791\uc5c5 \uc911', reported: '\uad00\ubcf4\uace0(\uc644)' };
       const icons = { hold: 'fa-pause-circle', working: 'fa-spinner', reported: 'fa-flag-checkered' };
-      titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\\/i>' + titles[type] + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
+      titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\/i>' + titles[type] + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
 
       const isAdmin = currentRole === 'admin';
-      let params = 'admin=' + isAdmin + '&period=all';
-      params += '&status=' + type;
-      
-      const res = await fetch('/api/todos?' + params);
-      let items = await res.json();
-      items.sort((a,b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+      const res = await fetch('/api/todos?admin=' + isAdmin + '&period=all&status=' + type);
+      cardDetailItems = await res.json();
+      cardDetailItems.sort((a,b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+      cardDetailPage = 1;
+      renderCardDetailPage();
+      document.getElementById('cardDetailPanel').classList.remove('hidden');
+    }
 
-      if (items.length === 0) {
-        listEl.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm"><i class="fas fa-inbox text-2xl mb-2"><\\/i><p>\ud56d\ubaa9\uc774 \uc5c6\uc2b5\ub2c8\ub2e4</p></div>';
-      } else {
-        listEl.innerHTML = items.map(t => {
-          const catColor = t.category_color || '#5EEAD4';
-          return '<div class="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-slate-750 transition">' +
-            '<span class="inline-block px-2 py-0.5 rounded text-xs font-medium text-white flex-shrink-0" style="background-color:'+catColor+'">'+(t.category_name||'\ubbf8\ubd84\ub958')+'</span>' +
-            '<span class="flex-1 text-sm text-gray-800 dark:text-gray-200 truncate">'+t.title+'</span>' +
-            '<span class="text-xs text-gray-500 flex-shrink-0">'+(t.teacher_name||'-')+'</span>' +
-            '<span class="text-xs font-bold flex-shrink-0 '+getProgressColor(t.progress)+'">'+t.progress+'%</span>' +
-            getStatusBadge(t) +
-          '</div>';
-        }).join('');
+    function renderCardDetailPage() {
+      const listEl = document.getElementById('cardDetailList');
+      const totalPages = Math.max(1, Math.ceil(cardDetailItems.length / CARD_DETAIL_PER_PAGE));
+      const start = (cardDetailPage - 1) * CARD_DETAIL_PER_PAGE;
+      const pageItems = cardDetailItems.slice(start, start + CARD_DETAIL_PER_PAGE);
+
+      if (cardDetailItems.length === 0) {
+        listEl.innerHTML = '<div class="p-6 text-center text-gray-400 text-sm"><i class="fas fa-inbox text-2xl mb-2"><\/i><p>\ud56d\ubaa9\uc774 \uc5c6\uc2b5\ub2c8\ub2e4</p></div>';
+        return;
       }
-      panel.classList.remove('hidden');
+
+      let html = pageItems.map(t => {
+        const catColor = t.category_color || '#5EEAD4';
+        return '<div class="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-slate-750 transition">' +
+          '<span class="inline-block px-2 py-0.5 rounded text-xs font-medium text-white flex-shrink-0" style="background-color:'+catColor+'">'+(t.category_name||'\ubbf8\ubd84\ub958')+'</span>' +
+          '<span class="flex-1 text-sm text-gray-800 dark:text-gray-200 truncate">'+t.title+'</span>' +
+          '<span class="text-xs text-gray-500 flex-shrink-0">'+(t.teacher_name||'-')+'</span>' +
+          '<span class="text-xs font-bold flex-shrink-0 '+getProgressColor(t.progress)+'">'+t.progress+'%</span>' +
+          getStatusBadge(t) +
+        '</div>';
+      }).join('');
+
+      if (totalPages > 1) {
+        html += '<div class="flex items-center justify-center gap-1 py-3 border-t border-gray-100 dark:border-slate-700">';
+        html += '<span class="text-xs text-gray-400 mr-2">' + cardDetailItems.length + '\uac1c \uc911 ' + (start+1) + '-' + Math.min(start + CARD_DETAIL_PER_PAGE, cardDetailItems.length) + '</span>';
+        for (let p = 1; p <= totalPages; p++) {
+          if (p === cardDetailPage) {
+            html += '<button class="w-7 h-7 rounded-full bg-mint-500 text-white text-xs font-bold">' + p + '</button>';
+          } else {
+            html += '<button onclick="goCardDetailPage('+p+')" class="w-7 h-7 rounded-full bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-medium hover:bg-mint-100 dark:hover:bg-mint-900 transition">' + p + '</button>';
+          }
+        }
+        html += '</div>';
+      }
+      listEl.innerHTML = html;
+    }
+
+    function goCardDetailPage(p) {
+      cardDetailPage = p;
+      renderCardDetailPage();
     }
 
     function closeCardDetail() {
