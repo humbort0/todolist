@@ -241,7 +241,7 @@ app.get('/api/todos', async (c) => {
     }
   } else {
     // 기본: completed 제외 (마감완료 버튼으로만 볼 수 있음)
-    query += " AND t.status != 'completed'"
+    query += " AND t.status NOT IN ('completed', 'approved')"
   }
 
   if (period === 'day') {
@@ -266,7 +266,7 @@ app.get('/api/todos', async (c) => {
   } else if (sortBy === 'progress') {
     query += ' ORDER BY t.progress ' + dir + ', t.due_date ASC'
   } else if (sortBy === 'status') {
-    query += " ORDER BY CASE t.status WHEN 'received' THEN 1 WHEN 'planning' THEN 2 WHEN 'working' THEN 3 WHEN 'reported' THEN 4 WHEN 'post_working' THEN 5 WHEN 'completed' THEN 6 WHEN 'hold' THEN 7 ELSE 8 END " + dir + ', t.due_date ASC'
+    query += " ORDER BY CASE t.status WHEN 'received' THEN 1 WHEN 'planning' THEN 2 WHEN 'working' THEN 3 WHEN 'reported' THEN 4 WHEN 'post_working' THEN 5 WHEN 'completed' THEN 6 WHEN 'approved' THEN 7 WHEN 'hold' THEN 8 ELSE 9 END " + dir + ', t.due_date ASC'
   } else {
     query += ' ORDER BY t.due_date ' + dir + ', t.status ASC, t.created_at DESC'
   }
@@ -425,7 +425,7 @@ app.get('/api/stats', async (c) => {
   const wc = isAdmin ? '' : 'WHERE is_private = 0'
   const and = wc ? wc + ' AND' : 'WHERE'
 
-  const [holdR, receivedR, planningR, workingR, reportedR, postWorkR, completedR, sharingTotal, latestSharings] = await Promise.all([
+  const [holdR, receivedR, planningR, workingR, reportedR, postWorkR, completedR, approvedR, sharingTotal, latestSharings] = await Promise.all([
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'hold'`).first(),
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'received'`).first(),
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'planning'`).first(),
@@ -433,6 +433,7 @@ app.get('/api/stats', async (c) => {
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'reported'`).first(),
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'post_working'`).first(),
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'completed'`).first(),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${and} status = 'approved'`).first(),
     c.env.DB.prepare("SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1").first(),
     c.env.DB.prepare('SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5').all()
   ])
@@ -445,6 +446,7 @@ app.get('/api/stats', async (c) => {
     reportedCount: reportedR?.count || 0,
     postWorkCount: postWorkR?.count || 0,
     completedCount: completedR?.count || 0,
+    approvedCount: approvedR?.count || 0,
     sharingTotalCount: sharingTotal?.count || 0,
     sharingLatestList: (latestSharings?.results || []).map((r: any) => r.content)
   })
@@ -1285,7 +1287,7 @@ function getIndexHTML(): string {
       document.getElementById('statWorking').textContent = stats.workingCount;
       document.getElementById('statReported').textContent = stats.reportedCount;
       document.getElementById('statPostWork').textContent = stats.postWorkCount;
-      document.getElementById('statCompleted').textContent = stats.completedCount;
+      document.getElementById('statCompleted').textContent = (stats.completedCount || 0) + (stats.approvedCount || 0);
       // Sharing Message 카드 업데이트 (개조식 ● 리스트)
       document.getElementById('sharingTotalCount').textContent = stats.sharingTotalCount || 0;
       const latestEl = document.getElementById('sharingLatestMsg');
@@ -1303,7 +1305,7 @@ function getIndexHTML(): string {
 
     // ===== Status Helpers =====
     function getStatusLabel(status) {
-      const map = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\ub9c8\uac10\uc644\ub8cc', hold: '\ubcf4\ub958' };
+      const map = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\uc644\ub8cc', approved: '\ub9c8\uac10\uc644\ub8cc', hold: '\ubcf4\ub958' };
       return map[status] || '\uc218\uc2e0';
     }
 
@@ -1314,11 +1316,11 @@ function getIndexHTML(): string {
       if (p <= 60) return 'working';
       if (p <= 70) return 'reported';
       if (p < 100) return 'post_working';
-      return 'reported';  // 100%도 reported → 관리자 승인 후에만 completed
+      return 'completed';  // 100% = 완료
     }
 
     function statusToProgress(s) {
-      const map = { received: 0, planning: 16, working: 31, reported: 61, post_working: 71, completed: 100 };
+      const map = { received: 0, planning: 16, working: 31, reported: 61, post_working: 71, completed: 100, approved: 100 };
       return map[s] !== undefined ? map[s] : 0;
     }
 
@@ -1326,15 +1328,14 @@ function getIndexHTML(): string {
       var s = todo.status || 'received';
       // progress=100 + reported → 완료 표시 (관리자 승인 대기이지만 UI는 '완료'로)
       var displayKey = s;
-      if (s === 'reported' && todo.progress === 100) displayKey = 'done_pending';
       const colors = {
         received:     { bg: 'bg-violet-100 dark:bg-violet-900', text: 'text-violet-700 dark:text-violet-200', dot: 'bg-violet-400',  icon: 'fa-inbox',        label: '\uc218\uc2e0',     hex: '#c4b5fd' },
         planning:     { bg: 'bg-green-100 dark:bg-green-900',   text: 'text-green-700 dark:text-green-200',   dot: 'bg-green-400',   icon: 'fa-lightbulb',    label: '\uad6c\uc0c1',     hex: '#86efac' },
         working:      { bg: 'bg-blue-100 dark:bg-blue-900',     text: 'text-blue-700 dark:text-blue-200',     dot: 'bg-blue-400',    icon: 'fa-spinner',      label: '\uc791\uc5c5\uc911', hex: '#93c5fd' },
         reported:     { bg: 'bg-orange-100 dark:bg-orange-900', text: 'text-orange-700 dark:text-orange-200', dot: 'bg-orange-400',  icon: 'fa-flag',         label: '\uad00\ubcf4\uace0',  hex: '#fdba74' },
         post_working: { bg: 'bg-yellow-100 dark:bg-yellow-900', text: 'text-yellow-700 dark:text-yellow-200', dot: 'bg-yellow-500',  icon: 'fa-tools',        label: '\ud6c4\uc791\uc5c5', hex: '#fde68a' },
-        done_pending: { bg: 'bg-red-100 dark:bg-red-900',       text: 'text-red-700 dark:text-red-200',       dot: 'bg-red-400',     icon: 'fa-hourglass-half', label: '\uc644\ub8cc',   hex: '#fca5a5' },
-        completed:    { bg: 'bg-red-100 dark:bg-red-900',       text: 'text-red-700 dark:text-red-200',       dot: 'bg-red-400',     icon: 'fa-check-circle', label: '\ub9c8\uac10\uc644\ub8cc', hex: '#fca5a5' },
+        completed:    { bg: 'bg-red-100 dark:bg-red-900',       text: 'text-red-700 dark:text-red-200',       dot: 'bg-red-400',     icon: 'fa-check-circle', label: '\uc644\ub8cc',   hex: '#fca5a5' },
+        approved:     { bg: 'bg-emerald-100 dark:bg-emerald-900', text: 'text-emerald-700 dark:text-emerald-200', dot: 'bg-emerald-400', icon: 'fa-check-double', label: '\ub9c8\uac10\uc644\ub8cc', hex: '#6ee7b7' },
         hold:         { bg: 'bg-gray-200 dark:bg-gray-800',     text: 'text-gray-600 dark:text-gray-300',     dot: 'bg-gray-500',    icon: 'fa-pause-circle', label: '\ubcf4\ub958',     hex: '#d1d5db' }
       };
       const c = colors[displayKey] || colors[s] || colors.received;
@@ -1400,7 +1401,7 @@ function getIndexHTML(): string {
         const catColor = todo.category_color || '#5EEAD4';
         const isPrivate = todo.is_private;
         // comment badge now generated inline with read/unread state
-        const isCompleted = todo.status === 'completed';
+        const isCompleted = todo.status === 'completed' || todo.status === 'approved';
         const isDisabled = isCompleted && !isAdmin;  // 관리자는 완료 상태도 슬라이더 조작 가능
         const delay = Math.min(idx * 0.04, 0.5);
 
@@ -1439,7 +1440,7 @@ function getIndexHTML(): string {
         
         if (isAdmin) {
           html += '<button onclick="togglePrivate('+todo.id+', '+(!isPrivate)+')" class="p-1.5 '+(isPrivate ? 'text-yellow-500' : 'text-gray-400')+' hover:text-yellow-600 transition" title="\ube44\uacf5\uac1c"><i class="fas '+(isPrivate ? 'fa-lock' : 'fa-lock-open')+'"><\\/i></button>';
-          if (todo.status !== 'completed') {
+          if (todo.status !== 'approved') {
             html += '<button onclick="approveTodo('+todo.id+')" class="p-1.5 text-green-500 hover:text-green-700 transition" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
           }
         } else {
@@ -1470,7 +1471,7 @@ function getIndexHTML(): string {
         const mobileCommentBadge = todo.comment_count > 0 ? '<span class="'+(mobileUnread ? 'ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full comment-badge-unread text-xs font-bold' : 'ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full comment-badge-read text-xs font-bold')+'">' + todo.comment_count + '</span>' : '';
         html += '<button onclick="showComments('+todo.id+')" class="'+mobileCommentBtnClass+'"><i class="fas fa-comment-dots"><\\/i>'+mobileCommentBadge+'</button>';
         if (isAdmin) {
-          if (todo.status !== 'completed') {
+          if (todo.status !== 'approved') {
             html += '<button onclick="approveTodo('+todo.id+')" class="p-1 text-green-500 text-sm" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
           }
         } else {
@@ -1662,7 +1663,7 @@ function getIndexHTML(): string {
 
     async function approveTodo(id) {
       if (!confirm('\uc774 \uc5c5\ubb34\ub97c \ucd5c\uc885 \ub9c8\uac10 \ucc98\ub9ac\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?')) return;
-      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: true, status: 'completed', progress: 100 }) });
+      await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_approved: true, status: 'approved', progress: 100 }) });
       loadTodos(); loadStats();
     }
 
@@ -1843,13 +1844,13 @@ function getIndexHTML(): string {
     async function openCardDetail(type) {
       if (activeCardFilter === type) { closeCardDetail(); return; }
       activeCardFilter = type;
-      ['hold','received','planning','working','reported','post_working','completed'].forEach(k => {
+      ['hold','received','planning','working','reported','post_working','completed','approved'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.toggle('card-active', k === type);
       });
       const titleEl = document.getElementById('cardDetailTitle');
-      const titles = { hold: '\ubcf4\ub958', received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\uc644\ub8cc' };
-      const icons = { hold: 'fa-pause-circle', received: 'fa-inbox', planning: 'fa-lightbulb', working: 'fa-spinner', reported: 'fa-flag', post_working: 'fa-tools', completed: 'fa-check-circle' };
+      const titles = { hold: '\ubcf4\ub958', received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\uc644\ub8cc', approved: '\ub9c8\uac10\uc644\ub8cc' };
+      const icons = { hold: 'fa-pause-circle', received: 'fa-inbox', planning: 'fa-lightbulb', working: 'fa-spinner', reported: 'fa-flag', post_working: 'fa-tools', completed: 'fa-check-circle', approved: 'fa-check-double' };
       titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\/i>' + (titles[type]||type) + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
 
       const isAdmin = currentRole === 'admin';
@@ -1905,7 +1906,7 @@ function getIndexHTML(): string {
 
     function closeCardDetail() {
       activeCardFilter = null;
-      ['hold','received','planning','working','reported','post_working','completed'].forEach(k => {
+      ['hold','received','planning','working','reported','post_working','completed','approved'].forEach(k => {
         const card = document.getElementById('card-' + k);
         if (card) card.classList.remove('card-active');
       });
@@ -1949,6 +1950,7 @@ function getIndexHTML(): string {
     }
 
     async function saveTeacherOrderToServer(order) {
+      try {
       const res = await fetch('/api/teachers/reorder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order }) });
       if (res.ok) {
         var listEl = document.getElementById('teacherList');
@@ -1957,9 +1959,14 @@ function getIndexHTML(): string {
       } else {
         showToast('\uc21c\uc11c \uc800\uc7a5 \uc2e4\ud328', 'error');
       }
+      } catch(e) { showToast('\ub124\ud2b8\uc6cc\ud06c \uc624\ub958: ' + e.message, 'error'); }
     }
 
     async function saveTeacherOrder() {
+      if (!teachersData || teachersData.length === 0) {
+        showToast('\uc800\uc7a5\ud560 \ubd80\uc11c\uc6d0\uc774 \uc5c6\uc2b5\ub2c8\ub2e4', 'error');
+        return;
+      }
       const order = teachersData.map(t => t.id);
       await saveTeacherOrderToServer(order);
       renderTeacherCards();
