@@ -3,5 +3,12 @@
   "name": "todolist",
   "compatibility_date": "2026-03-27",
   "pages_build_output_dir": "./dist",
-  "compatibility_flags": ["nodejs_compat"]
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tdl-production",
+      "database_id": "d2958d12-3ba6-4e9a-8c8b-5a5e0172fc6d"
+    }
+  ]
 }
