@@ -1343,7 +1343,7 @@ function getIndexHTML(): string {
         html += '<div class="flex items-center gap-2">';
         html += '<div class="progress-compact flex-1" data-todoid="'+todo.id+'">';
         html += '<div class="slider-thumb-tip" id="tip-'+todo.id+'">'+getProgressLabel(todo.progress)+'</div>';
-        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)" onmousedown="this.parentElement.classList.add(\x27dragging\x27)" onmouseup="this.parentElement.classList.remove(\x27dragging\x27)" ontouchstart="this.parentElement.classList.add(\x27dragging\x27)" ontouchend="this.parentElement.classList.remove(\x27dragging\x27)">';
+        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)" onmousedown="sliderDrag(this,true)" onmouseup="sliderDrag(this,false)" ontouchstart="sliderDrag(this,true)" ontouchend="sliderDrag(this,false)">';
         html += '<div class="slider-labels">' + getSliderLabels(todo.progress) + '</div>';
         html += '</div>';
         html += getStatusBadge(todo, true);
@@ -1411,7 +1411,7 @@ function getIndexHTML(): string {
         html += '<div class="flex items-center gap-2">';
         html += '<div class="progress-compact flex-1" data-todoid="'+todo.id+'">';
         html += '<div class="slider-thumb-tip" id="tip-m-'+todo.id+'">'+getProgressLabel(todo.progress)+'</div>';
-        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)" ontouchstart="this.parentElement.classList.add(\x27dragging\x27)" ontouchend="this.parentElement.classList.remove(\x27dragging\x27)">';
+        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)" ontouchstart="sliderDrag(this,true)" ontouchend="sliderDrag(this,false)">';
         html += '<div class="slider-labels">' + getSliderLabels(todo.progress) + '</div>';
         html += '</div>';
         html += getStatusBadge(todo);
@@ -1500,6 +1500,11 @@ function getIndexHTML(): string {
 
     function initSliderColors() {
       document.querySelectorAll('input[type="range"].slider-bg').forEach(applySliderStyle);
+    }
+
+    function sliderDrag(el, start) {
+      var p = el.parentElement;
+      if (p) { if (start) p.classList.add('dragging'); else p.classList.remove('dragging'); }
     }
 
         // ===== CRUD =====
