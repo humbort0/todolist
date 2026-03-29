@@ -416,8 +416,8 @@ app.get('/api/stats', async (c) => {
   const waitingApproval = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'reported'`).first()
   const holdCount = await c.env.DB.prepare(`SELECT COUNT(*) as count FROM todos ${whereClause ? whereClause + ' AND' : 'WHERE'} status = 'hold'`).first()
 
-  const sharingWeekly = await c.env.DB.prepare(
-    "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1 AND created_at >= date('now', 'weekday 1', '-7 days')"
+  const sharingTotal = await c.env.DB.prepare(
+    "SELECT COUNT(*) as count FROM sharing_messages WHERE is_active = 1"
   ).first()
   const latestSharings = await c.env.DB.prepare(
     'SELECT content FROM sharing_messages WHERE is_active = 1 ORDER BY created_at DESC LIMIT 5'
@@ -427,7 +427,7 @@ app.get('/api/stats', async (c) => {
     inProgress: inProgress?.count || 0,
     waitingApproval: waitingApproval?.count || 0,
     holdCount: holdCount?.count || 0,
-    sharingWeeklyCount: sharingWeekly?.count || 0,
+    sharingTotalCount: sharingTotal?.count || 0,
     sharingLatestList: (latestSharings?.results || []).map((r: any) => r.content)
   })
 })
@@ -673,15 +673,15 @@ function getIndexHTML(): string {
       
       <!-- Summary Cards (3 cards + motto card) -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div onclick="openCardDetail('total')" id="card-total" class="bg-mint-50 border border-mint-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-1">
+        <div onclick="openCardDetail('hold')" id="card-hold" class="bg-yellow-50 border border-yellow-200 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-1">
           <div class="flex items-center justify-between mb-3">
-            <div class="w-10 h-10 bg-mint-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-list-check text-mint-700"></i>
+            <div class="w-10 h-10 bg-yellow-200 rounded-xl flex items-center justify-center">
+              <i class="fas fa-pause-circle text-yellow-700"></i>
             </div>
-            <span class="text-xs text-mint-600 font-medium bg-mint-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-mint-400">\uc804\uccb4</span>
+            <span class="text-xs text-yellow-700 font-medium bg-yellow-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-yellow-400">\ubcf4\ub958</span>
           </div>
-          <p id="statTotal" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">\uc804\uccb4 \ud560 \uc77c</p>
+          <p id="statHold" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">\ubcf4\ub958 \ud56d\ubaa9</p>
         </div>
         <div onclick="openCardDetail('working')" id="card-working" class="bg-peach-50 border border-orange-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-2">
           <div class="flex items-center justify-between mb-3">
@@ -712,9 +712,9 @@ function getIndexHTML(): string {
               </div>
               <span class="text-xs text-blue-600 font-semibold dark:text-blue-400">Sharing</span>
             </div>
-            <div id="sharingWeeklyBadge" class="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded-full">
+            <div id="sharingTotalBadge" class="flex items-center gap-1 bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded-full">
               <i class="fas fa-comment-dots text-blue-500 text-xs"></i>
-              <span id="sharingWeeklyCount" class="text-xs font-bold text-blue-700 dark:text-blue-300">0</span>
+              <span id="sharingTotalCount" class="text-xs font-bold text-blue-700 dark:text-blue-300">0</span>
             </div>
           </div>
           <div id="sharingLatestMsg" class="flex-1 overflow-hidden space-y-0.5 sm:space-y-1"></div>
@@ -1213,7 +1213,7 @@ function getIndexHTML(): string {
       document.getElementById('statInProgress').textContent = stats.inProgress;
       document.getElementById('statWaiting').textContent = stats.waitingApproval;
       // Sharing Message 카드 업데이트 (개조식 ● 리스트)
-      document.getElementById('sharingWeeklyCount').textContent = stats.sharingWeeklyCount || 0;
+      document.getElementById('sharingTotalCount').textContent = stats.sharingTotalCount || 0;
       const latestEl = document.getElementById('sharingLatestMsg');
       if (latestEl) {
         const msgs = stats.sharingLatestList || [];
@@ -1649,8 +1649,8 @@ function getIndexHTML(): string {
       const titleEl = document.getElementById('cardDetailTitle');
       const listEl = document.getElementById('cardDetailList');
       
-      const titles = { total: '\uc804\uccb4 \ud560 \uc77c', working: '\uc791\uc5c5 \uc911', reported: '\uad00\ubcf4\uace0(\uc644)' };
-      const icons = { total: 'fa-list-check', working: 'fa-spinner', reported: 'fa-flag-checkered' };
+      const titles = { hold: '\ubcf4\ub958 \ud56d\ubaa9', working: '\uc791\uc5c5 \uc911', reported: '\uad00\ubcf4\uace0(\uc644)' };
+      const icons = { hold: 'fa-pause-circle', working: 'fa-spinner', reported: 'fa-flag-checkered' };
       titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\\/i>' + titles[type] + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
 
       const isAdmin = currentRole === 'admin';
