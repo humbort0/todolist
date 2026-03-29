@@ -1410,7 +1410,8 @@ function getIndexHTML(): string {
         const isPrivate = todo.is_private;
         // comment badge now generated inline with read/unread state
         const isCompleted = todo.status === 'completed' || todo.status === 'approved';
-        const isDisabled = isCompleted && !isAdmin;  // 관리자는 완료 상태도 슬라이더 조작 가능
+        const isApproved = todo.status === 'approved';
+        const isDisabled = isApproved && !isAdmin;  // 마감완료만 슬라이더 비활성화 (완료 상태에서도 슬라이더 조작 가능)
         const delay = Math.min(idx * 0.04, 0.5);
 
         // Desktop Row
@@ -1452,8 +1453,8 @@ function getIndexHTML(): string {
             html += '<button onclick="approveTodo('+todo.id+')" class="p-1.5 text-green-500 hover:text-green-700 transition" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
           }
         } else {
-          // Regular user: status selector
-          if (!isCompleted) {
+          // Regular user: status selector (마감완료 제외 항상 표시)
+          if (!isApproved) {
             html += '<select onchange="updateStatus('+todo.id+', this.value)" class="text-xs border border-gray-200 rounded px-1 py-0.5 dark:bg-slate-700 dark:border-slate-600 dark:text-white" style="max-width:90px;">';
             ['received','planning','working','reported','post_working','completed','hold'].forEach(s => {
               html += '<option value="'+s+'"'+((todo.status===s)?' selected':'')+'>'+getStatusLabel(s)+'</option>';
@@ -1483,7 +1484,7 @@ function getIndexHTML(): string {
             html += '<button onclick="approveTodo('+todo.id+')" class="p-1 text-green-500 text-sm" title="\ucd5c\uc885 \ub9c8\uac10"><i class="fas fa-check-double"><\\/i></button>';
           }
         } else {
-          if (!isCompleted) {
+          if (!isApproved) {
             html += '<button onclick="showMobileStatusMenu('+todo.id+', &quot;'+todo.status+'&quot;, event)" class="p-1 text-blue-500 text-sm" title="\uc0c1\ud0dc \ubcc0\uacbd"><i class="fas fa-exchange-alt"><\\/i></button>';
           }
         }
@@ -1650,7 +1651,7 @@ function getIndexHTML(): string {
 
     async function updateProgress(id, value) {
       const v = parseInt(value);
-      const newStatus = progressToStatus(v);  // 100% → reported (관보고 완)
+      const newStatus = progressToStatus(v);  // 100% → completed (완료)
       const updates = { progress: v, status: newStatus };
       await fetch('/api/todos/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
       loadTodos(); loadStats();
