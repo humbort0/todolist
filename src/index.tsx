@@ -107,6 +107,13 @@ app.post('/api/teachers', async (c) => {
   return c.json({ id: result.meta.last_row_id, name })
 })
 
+app.put('/api/teachers/:id', async (c) => {
+  const id = c.req.param('id')
+  const { name } = await c.req.json()
+  await c.env.DB.prepare('UPDATE teachers SET name = ? WHERE id = ?').bind(name, id).run()
+  return c.json({ success: true })
+})
+
 app.delete('/api/teachers/:id', async (c) => {
   const id = c.req.param('id')
   await c.env.DB.prepare('UPDATE teachers SET is_active = 0 WHERE id = ?').bind(id).run()
@@ -521,10 +528,11 @@ function getIndexHTML(): string {
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
     * { font-family: 'Noto Sans KR', sans-serif; }
-    input[type="range"] { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 4px; outline: none; }
-    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #14b8a6; cursor: pointer; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.15s ease; }
-    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
-    input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #14b8a6; cursor: pointer; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+    input[type="range"] { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 4px; outline: none; background: #e5e7eb; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--thumb-color, #a78bfa); cursor: pointer; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.25); transition: all 0.25s cubic-bezier(0.4,0,0.2,1); position: relative; z-index: 2; }
+    input[type="range"]:hover::-webkit-slider-thumb, input[type="range"]:active::-webkit-slider-thumb { width: 28px; height: 22px; border-radius: 11px; transform: scale(1.05); }
+    input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--thumb-color, #a78bfa); cursor: pointer; border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.25); transition: all 0.25s cubic-bezier(0.4,0,0.2,1); }
+    input[type="range"]:hover::-moz-range-thumb, input[type="range"]:active::-moz-range-thumb { width: 28px; height: 22px; border-radius: 11px; }
     .fade-in { animation: fadeIn 0.5s cubic-bezier(0.23,1,0.32,1); }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
     .slide-up { animation: slideUp 0.5s cubic-bezier(0.23,1,0.32,1) both; }
@@ -539,7 +547,7 @@ function getIndexHTML(): string {
     .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 24px -8px rgba(0,0,0,0.15); }
     .card-hover:active { transform: translateY(-1px); }
     .card-active { ring: 2px; box-shadow: 0 0 0 3px rgba(20,184,166,0.4); }
-    .slider-bg { background: linear-gradient(to right, #99f6e4 0%, #14b8a6 50%, #0d9488 100%); }
+    .slider-bg { background: linear-gradient(to right, var(--track-left, #e5e7eb) 0%, var(--track-left, #e5e7eb) var(--progress-pct, 0%), #e5e7eb var(--progress-pct, 0%), #e5e7eb 100%); transition: background 0.2s ease; }
     .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); }
     .tooltip { position: relative; }
     .tooltip:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; white-space: nowrap; z-index: 50; }
@@ -553,7 +561,14 @@ function getIndexHTML(): string {
     .stagger-1 { animation-delay: 0.05s; } .stagger-2 { animation-delay: 0.1s; } .stagger-3 { animation-delay: 0.15s; } .stagger-4 { animation-delay: 0.2s; }
     .card-detail-anim { animation: cardDetail 0.3s cubic-bezier(0.23,1,0.32,1); }
     @keyframes cardDetail { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-    .progress-compact { max-width: 66%; min-width: 50px; }
+    .progress-compact { max-width: 66%; min-width: 50px; position: relative; }
+    .slider-labels { display: flex; justify-content: space-between; margin-top: 2px; padding: 0 2px; pointer-events: none; }
+    .slider-labels span { font-size: 9px; color: #aaa; white-space: nowrap; text-align: center; transition: color 0.2s, font-weight 0.2s; }
+    .slider-labels span.active-label { color: var(--thumb-color, #a78bfa); font-weight: 600; }
+    @media (max-width: 767px) { .slider-labels span { font-size: 8px; } }
+    .slider-thumb-tip { position: absolute; top: -26px; transform: translateX(-50%); background: var(--thumb-color, #a78bfa); color: white; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 8px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 10; }
+    .slider-thumb-tip::after { content: ''; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid var(--thumb-color, #a78bfa); }
+    .progress-compact:hover .slider-thumb-tip, .progress-compact:active .slider-thumb-tip, .progress-compact.dragging .slider-thumb-tip { opacity: 1; }
     .count-anim { transition: all 0.3s ease; }
     .teacher-card { transition: all 0.2s ease; cursor: pointer; }
     .teacher-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -1326,13 +1341,16 @@ function getIndexHTML(): string {
         // Progress Slider with status labels (col-span-4)
         html += '<div class="col-span-4">';
         html += '<div class="flex items-center gap-2">';
-        html += '<div class="progress-compact flex-1"><input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)"></div>';
+        html += '<div class="progress-compact flex-1" data-todoid="'+todo.id+'">';
+        html += '<div class="slider-thumb-tip" id="tip-'+todo.id+'">'+getProgressLabel(todo.progress)+'</div>';
+        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)" onmousedown="this.parentElement.classList.add(\x27dragging\x27)" onmouseup="this.parentElement.classList.remove(\x27dragging\x27)" ontouchstart="this.parentElement.classList.add(\x27dragging\x27)" ontouchend="this.parentElement.classList.remove(\x27dragging\x27)">';
+        html += '<div class="slider-labels">' + getSliderLabels(todo.progress) + '</div>';
+        html += '</div>';
         html += getStatusBadge(todo, true);
         html += '</div>';
-        html += '<div class="flex justify-between mt-0.5 px-0.5" style="font-size:9px;color:#aaa;"><span>\uc218\uc2e0</span><span>\uad6c\uc0c1</span><span>\uc791\uc5c5\uc911</span><span>\uad00\ubcf4\uace0</span><span>\ud6c4\uc791\uc5c5</span><span>\uc644\ub8cc</span></div>';
         html += '</div>';
         
-        // Actions
+                // Actions
         html += '<div class="col-span-2 flex items-center justify-end gap-1">';
         const unread = isUnread(todo);
         const commentBtnClass = unread ? 'p-1.5 comment-btn-unread hover:text-pink-700 transition relative' : 'p-1.5 text-gray-400 hover:text-mint-600 transition relative';
@@ -1391,33 +1409,100 @@ function getIndexHTML(): string {
         html += '</div>';
         html += '<div class="mb-1">';
         html += '<div class="flex items-center gap-2">';
-        html += '<div class="progress-compact flex-1"><input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)"></div>';
+        html += '<div class="progress-compact flex-1" data-todoid="'+todo.id+'">';
+        html += '<div class="slider-thumb-tip" id="tip-m-'+todo.id+'">'+getProgressLabel(todo.progress)+'</div>';
+        html += '<input type="range" min="0" max="100" value="'+todo.progress+'" class="w-full slider-bg" '+(isDisabled ? 'disabled' : '')+' data-todoid="'+todo.id+'" onchange="updateProgress('+todo.id+', this.value)" oninput="onSliderInput(this)" ontouchstart="this.parentElement.classList.add(\x27dragging\x27)" ontouchend="this.parentElement.classList.remove(\x27dragging\x27)">';
+        html += '<div class="slider-labels">' + getSliderLabels(todo.progress) + '</div>';
+        html += '</div>';
         html += getStatusBadge(todo);
         html += '</div>';
-        html += '<div class="flex justify-between mt-0.5 px-0.5" style="font-size:8px;color:#aaa;"><span>\uc218\uc2e0</span><span>\uad6c\uc0c1</span><span>\uc791\uc5c5\uc911</span><span>\uad00\ubcf4\uace0</span><span>\ud6c4\uc791\uc5c5</span><span>\uc644\ub8cc</span></div>';
         html += '</div>';
+                html += '</div>';
         html += '</div>';
       });
 
       container.innerHTML = html;
+      setTimeout(initSliderColors, 50);
+    }
+
+    // ===== Segment Color Map =====
+    function getSegmentColor(p) {
+      p = parseInt(p);
+      if (p <= 15) return { thumb: '#c4b5fd', track: '#c4b5fd', label: '\uc218\uc2e0' };
+      if (p <= 30) return { thumb: '#86efac', track: '#86efac', label: '\uad6c\uc0c1' };
+      if (p <= 60) return { thumb: '#93c5fd', track: '#93c5fd', label: '\uc791\uc5c5\uc911' };
+      if (p <= 70) return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0(\uc644)' };
+      if (p < 100) return { thumb: '#fde68a', track: '#fde68a', label: '\ud6c4\uc791\uc5c5\uc911' };
+      return { thumb: '#fca5a5', track: '#fca5a5', label: '\uc644\ub8cc' };
+    }
+
+    function getSliderLabels(progress) {
+      var segs = [
+        { label: '\uc218\uc2e0', max: 15 },
+        { label: '\uad6c\uc0c1', max: 30 },
+        { label: '\uc791\uc5c5\uc911', max: 60 },
+        { label: '\uad00\ubcf4\uace0', max: 70 },
+        { label: '\ud6c4\uc791\uc5c5', max: 99 },
+        { label: '\uc644\ub8cc', max: 100 }
+      ];
+      var p = parseInt(progress);
+      var prevMax = -1;
+      return segs.map(function(s, i) {
+        var active = (i === 0) ? (p <= s.max) : (p > segs[i-1].max && p <= s.max);
+        return '<span' + (active ? ' class="active-label"' : '') + '>' + s.label + '</span>';
+      }).join('');
+    }
+
+    function applySliderStyle(slider) {
+      var v = parseInt(slider.value);
+      var seg = getSegmentColor(v);
+      var pct = v + '%';
+      slider.style.setProperty('--thumb-color', seg.thumb);
+      slider.style.setProperty('--track-left', seg.track);
+      slider.style.setProperty('--progress-pct', pct);
+      var container = slider.parentElement;
+      if (container) {
+        container.style.setProperty('--thumb-color', seg.thumb);
+        var tip = container.querySelector('.slider-thumb-tip');
+        if (tip) {
+          tip.textContent = seg.label;
+          tip.style.background = seg.thumb;
+          tip.style.setProperty('--thumb-color', seg.thumb);
+          var rect = slider.getBoundingClientRect();
+          if (rect.width > 0) {
+            var thumbX = (v / 100) * rect.width;
+            tip.style.left = thumbX + 'px';
+          }
+        }
+        var labels = container.querySelectorAll('.slider-labels span');
+        var maxVals = [15, 30, 60, 70, 99, 100];
+        labels.forEach(function(lbl, i) {
+          var isActive = (i === 0) ? (v <= maxVals[0]) : (v > maxVals[i-1] && v <= maxVals[i]);
+          lbl.classList.toggle('active-label', isActive);
+        });
+      }
     }
 
     // ===== Slider Input Handler (real-time status sync) =====
     function onSliderInput(slider) {
-      const v = parseInt(slider.value);
-      const newStatus = progressToStatus(v);
-      // Update the status badge next to the slider
-      const wrapper = slider.closest('.flex');
+      var v = parseInt(slider.value);
+      var newStatus = progressToStatus(v);
+      applySliderStyle(slider);
+      var wrapper = slider.closest('.flex');
       if (!wrapper) return;
-      const badge = wrapper.querySelector('.status-pill-pc, .inline-flex');
+      var badge = wrapper.querySelector('.status-pill-pc, .inline-flex');
       if (badge) {
-        const tempTodo = { status: newStatus };
-        const isPc = !!badge.classList.contains('status-pill-pc');
+        var tempTodo = { status: newStatus };
+        var isPc = !!badge.classList.contains('status-pill-pc');
         badge.outerHTML = getStatusBadge(tempTodo, isPc);
       }
     }
 
-    // ===== CRUD =====
+    function initSliderColors() {
+      document.querySelectorAll('input[type="range"].slider-bg').forEach(applySliderStyle);
+    }
+
+        // ===== CRUD =====
     function showAddTodoModal() {
       document.getElementById('todoModalTitle').innerHTML = '<i class="fas fa-plus-circle text-mint-500 mr-2"><\\/i>\uc0c8 \ud560 \uc77c \ucd94\uac00';
       document.getElementById('todoTitle').value = '';
@@ -1752,14 +1837,15 @@ function getIndexHTML(): string {
 
 
     function renderAdminTeachers() {
-      document.getElementById('teacherList').innerHTML = teachersData.map((t, idx) =>
-        '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg" draggable="true" data-teacher-id="'+t.id+'" ondragstart="onTeacherDragStart(event, '+idx+')" ondragover="onTeacherDragOver(event)" ondrop="onTeacherDrop(event, '+idx+')" ondragend="onTeacherDragEnd(event)">' +
-        '<div class="flex items-center gap-2"><i class="fas fa-grip-vertical text-gray-400 drag-handle"><\\/i><span class="text-sm text-gray-700 dark:text-gray-200"><i class="fas fa-user text-mint-500 mr-1"><\\/i>' + t.name + '</span></div>' +
-        '<button onclick="deleteTeacher('+t.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"><\\/i></button></div>'
-      ).join('');
+      document.getElementById('teacherList').innerHTML = teachersData.map(function(t, idx) {
+        return '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg" draggable="true" data-teacher-id="'+t.id+'" ondragstart="onTeacherDragStart(event, '+idx+')" ondragover="onTeacherDragOver(event)" ondrop="onTeacherDrop(event, '+idx+')" ondragend="onTeacherDragEnd(event)">' +
+        '<div class="flex items-center gap-2"><i class="fas fa-grip-vertical text-gray-400 drag-handle"><\/i><span id="teacher-name-'+t.id+'" class="text-sm text-gray-700 dark:text-gray-200 cursor-pointer hover:text-mint-600" onclick="startEditTeacherName('+t.id+', this)"><i class="fas fa-user text-mint-500 mr-1"><\/i>' + t.name + '</span></div>' +
+        '<div class="flex items-center gap-1"><button onclick="startEditTeacherName('+t.id+', document.getElementById(&quot;teacher-name-'+t.id+'&quot;))" class="text-blue-400 hover:text-blue-600 text-sm" title="\uc774\ub984 \uc218\uc815"><i class="fas fa-pen"><\/i></button>' +
+        '<button onclick="deleteTeacher('+t.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"><\/i></button></div></div>';
+      }).join('');
     }
 
-    let dragTeacherIdx = null;
+        let dragTeacherIdx = null;
     function onTeacherDragStart(e, idx) { dragTeacherIdx = idx; e.target.style.opacity = '0.5'; }
     function onTeacherDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
     function onTeacherDragEnd(e) { e.target.style.opacity = '1'; document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over')); }
@@ -1777,15 +1863,49 @@ function getIndexHTML(): string {
     }
 
     function renderAdminCategories() {
-      document.getElementById('categoryList').innerHTML = categoriesData.map(c =>
-        '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg">' +
+      document.getElementById('categoryList').innerHTML = categoriesData.map(function(c) {
+        return '<div class="flex items-center justify-between bg-gray-50 dark:bg-slate-700 px-3 py-2 rounded-lg">' +
         '<div class="flex items-center gap-2"><div class="w-4 h-4 rounded" style="background-color:'+c.color+'"></div>' +
-        '<span class="text-sm text-gray-700 dark:text-gray-200">' + c.name + '</span></div>' +
-        '<button onclick="deleteCategory('+c.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"><\\/i></button></div>'
-      ).join('');
+        '<span id="cat-name-'+c.id+'" class="text-sm text-gray-700 dark:text-gray-200 cursor-pointer hover:text-mint-600" onclick="startEditCategoryName('+c.id+', this)">' + c.name + '</span></div>' +
+        '<div class="flex items-center gap-1"><button onclick="startEditCategoryName('+c.id+', document.getElementById(&quot;cat-name-'+c.id+'&quot;))" class="text-blue-400 hover:text-blue-600 text-sm" title="\uc774\ub984 \uc218\uc815"><i class="fas fa-pen"><\/i></button>' +
+        '<button onclick="deleteCategory('+c.id+')" class="text-red-400 hover:text-red-600 text-sm"><i class="fas fa-trash"><\/i></button></div></div>';
+      }).join('');
     }
 
-    async function addTeacher() {
+    function startEditTeacherName(id, el) {
+      var currentName = el.textContent.trim();
+      var input = document.createElement('input');
+      input.type = 'text'; input.value = currentName;
+      input.className = 'px-2 py-1 border border-mint-400 rounded text-sm w-full focus:ring-2 focus:ring-mint-400 outline-none dark:bg-slate-600 dark:text-white';
+      input.onblur = async function() {
+        var newName = input.value.trim();
+        if (newName && newName !== currentName) {
+          await fetch('/api/teachers/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) });
+          await loadTeachers(); renderAdminTeachers();
+        } else { renderAdminTeachers(); }
+      };
+      input.onkeydown = function(e) { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') renderAdminTeachers(); };
+      el.replaceWith(input); input.focus(); input.select();
+    }
+
+    function startEditCategoryName(id, el) {
+      var currentName = el.textContent.trim();
+      var input = document.createElement('input');
+      input.type = 'text'; input.value = currentName;
+      input.className = 'px-2 py-1 border border-mint-400 rounded text-sm w-full focus:ring-2 focus:ring-mint-400 outline-none dark:bg-slate-600 dark:text-white';
+      input.onblur = async function() {
+        var newName = input.value.trim();
+        if (newName && newName !== currentName) {
+          var cat = categoriesData.find(function(c) { return c.id === id; });
+          await fetch('/api/categories/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName, color: cat ? cat.color : '#5EEAD4' }) });
+          await loadCategories(); renderAdminCategories();
+        } else { renderAdminCategories(); }
+      };
+      input.onkeydown = function(e) { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') renderAdminCategories(); };
+      el.replaceWith(input); input.focus(); input.select();
+    }
+
+        async function addTeacher() {
       const name = document.getElementById('newTeacherName').value.trim();
       if (!name) return;
       await fetch('/api/teachers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
