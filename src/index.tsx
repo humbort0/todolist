@@ -107,6 +107,24 @@ app.post('/api/teachers', async (c) => {
   return c.json({ id: result.meta.last_row_id, name })
 })
 
+// reorder MUST come before :id route to avoid 'reorder' being matched as :id
+app.put('/api/teachers/reorder', async (c) => {
+  try {
+    const body = await c.req.json()
+    const order = body.order
+    if (!order || !Array.isArray(order) || order.length === 0) {
+      return c.json({ error: 'order array is required' }, 400)
+    }
+    await ensureDB(c.env.DB)
+    for (let i = 0; i < order.length; i++) {
+      await c.env.DB.prepare('UPDATE teachers SET sort_order = ? WHERE id = ?').bind(i, order[i]).run()
+    }
+    return c.json({ success: true })
+  } catch (e: any) {
+    return c.json({ error: e.message || 'Unknown error' }, 500)
+  }
+})
+
 app.put('/api/teachers/:id', async (c) => {
   const id = c.req.param('id')
   const { name } = await c.req.json()
@@ -117,16 +135,6 @@ app.put('/api/teachers/:id', async (c) => {
 app.delete('/api/teachers/:id', async (c) => {
   const id = c.req.param('id')
   await c.env.DB.prepare('UPDATE teachers SET is_active = 0 WHERE id = ?').bind(id).run()
-  return c.json({ success: true })
-})
-
-app.put('/api/teachers/reorder', async (c) => {
-  const { order } = await c.req.json()
-  await ensureDB(c.env.DB)
-  const stmts = order.map((id: number, idx: number) =>
-    c.env.DB.prepare('UPDATE teachers SET sort_order = ? WHERE id = ?').bind(idx, id)
-  )
-  await c.env.DB.batch(stmts)
   return c.json({ success: true })
 })
 
@@ -236,7 +244,7 @@ app.get('/api/todos', async (c) => {
   }
 
   if (statusFilter) {
-    if (['completed','working','reported','hold','received','planning','post_working'].includes(statusFilter)) {
+    if (['completed','approved','working','reported','hold','received','planning','post_working'].includes(statusFilter)) {
       query += " AND t.status = '" + statusFilter + "'"
     }
   } else {
