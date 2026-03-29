@@ -710,15 +710,15 @@ function getIndexHTML(): string {
           <p id="statInProgress" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
           <p class="text-sm text-gray-500 dark:text-gray-400">\uc791\uc5c5 \uc911</p>
         </div>
-        <div onclick="openCardDetail('reported')" id="card-reported" class="bg-purple-50 border border-purple-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-3">
+        <div onclick="openCardDetail('reported')" id="card-reported" class="bg-orange-50 border border-orange-100 rounded-2xl p-5 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-3">
           <div class="flex items-center justify-between mb-3">
-            <div class="w-10 h-10 bg-purple-200 rounded-xl flex items-center justify-center">
-              <i class="fas fa-flag-checkered text-purple-600"></i>
+            <div class="w-10 h-10 bg-orange-200 rounded-xl flex items-center justify-center">
+              <i class="fas fa-flag-checkered text-orange-600"></i>
             </div>
-            <span class="text-xs text-purple-600 font-medium bg-purple-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-purple-400">\ubcf4\uace0</span>
+            <span class="text-xs text-orange-600 font-medium bg-orange-100 px-2 py-1 rounded-full dark:bg-slate-700 dark:text-orange-400">\ubcf4\uace0</span>
           </div>
           <p id="statWaiting" class="text-3xl font-bold text-gray-800 dark:text-white count-anim">0</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400">\uad00\ubcf4\uace0(\uc644)</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">\uad00\ubcf4\uace0</p>
         </div>
         <!-- Sharing Message Card -->
         <div onclick="toggleSharingPanel()" id="card-sharing" class="bg-blue-50 border border-blue-100 rounded-2xl p-3 sm:p-4 card-hover dark:bg-slate-800 dark:border-slate-700 slide-up stagger-4 cursor-pointer flex flex-col">
@@ -1246,7 +1246,7 @@ function getIndexHTML(): string {
 
     // ===== Status Helpers =====
     function getStatusLabel(status) {
-      const map = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', post_working: '\ud6c4\uc791\uc5c5\uc911', completed: '\uc644\ub8cc', hold: '\ubcf4\ub958' };
+      const map = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', completed: '\ub9c8\uac10\uc644\ub8cc', hold: '\ubcf4\ub958' };
       return map[status] || '\uc218\uc2e0';
     }
 
@@ -1257,7 +1257,7 @@ function getIndexHTML(): string {
       if (p <= 60) return 'working';
       if (p <= 70) return 'reported';
       if (p < 100) return 'post_working';
-      return 'reported';  // 100%도 관보고(완) → 관리자 승인 후에만 completed
+      return 'reported';  // 100%도 reported → 관리자 승인 후에만 completed
     }
 
     function statusToProgress(s) {
@@ -1266,17 +1266,21 @@ function getIndexHTML(): string {
     }
 
     function getStatusBadge(todo, pcMode) {
-      const s = todo.status || 'received';
+      var s = todo.status || 'received';
+      // progress=100 + reported → 완료 표시 (관리자 승인 대기이지만 UI는 '완료'로)
+      var displayKey = s;
+      if (s === 'reported' && todo.progress === 100) displayKey = 'done_pending';
       const colors = {
-        received: { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300', dot: 'bg-gray-400', icon: 'fa-inbox', label: '\uc218\uc2e0' },
-        planning: { bg: 'bg-cyan-100 dark:bg-cyan-900', text: 'text-cyan-700 dark:text-cyan-200', dot: 'bg-cyan-500', icon: 'fa-lightbulb', label: '\uad6c\uc0c1' },
-        working: { bg: 'bg-blue-100 dark:bg-blue-900', text: 'text-blue-800 dark:text-blue-200', dot: 'bg-blue-500', icon: 'fa-spinner', label: '\uc791\uc5c5\uc911' },
-        reported: { bg: 'bg-purple-100 dark:bg-purple-900', text: 'text-purple-800 dark:text-purple-200', dot: 'bg-purple-500', icon: 'fa-flag', label: '\uad00\ubcf4\uace0(\uc644)' },
-        post_working: { bg: 'bg-indigo-100 dark:bg-indigo-900', text: 'text-indigo-700 dark:text-indigo-200', dot: 'bg-indigo-500', icon: 'fa-tools', label: '\ud6c4\uc791\uc5c5\uc911' },
-        completed: { bg: 'bg-green-100 dark:bg-green-900', text: 'text-green-800 dark:text-green-200', dot: 'bg-green-500', icon: 'fa-check-circle', label: '\uc644\ub8cc' },
-        hold: { bg: 'bg-orange-100 dark:bg-orange-900', text: 'text-orange-700 dark:text-orange-200', dot: 'bg-orange-500', icon: 'fa-pause-circle', label: '\ubcf4\ub958' }
+        received:     { bg: 'bg-violet-100 dark:bg-violet-900', text: 'text-violet-700 dark:text-violet-200', dot: 'bg-violet-400',  icon: 'fa-inbox',        label: '\uc218\uc2e0',     hex: '#c4b5fd' },
+        planning:     { bg: 'bg-green-100 dark:bg-green-900',   text: 'text-green-700 dark:text-green-200',   dot: 'bg-green-400',   icon: 'fa-lightbulb',    label: '\uad6c\uc0c1',     hex: '#86efac' },
+        working:      { bg: 'bg-blue-100 dark:bg-blue-900',     text: 'text-blue-700 dark:text-blue-200',     dot: 'bg-blue-400',    icon: 'fa-spinner',      label: '\uc791\uc5c5\uc911', hex: '#93c5fd' },
+        reported:     { bg: 'bg-orange-100 dark:bg-orange-900', text: 'text-orange-700 dark:text-orange-200', dot: 'bg-orange-400',  icon: 'fa-flag',         label: '\uad00\ubcf4\uace0',  hex: '#fdba74' },
+        post_working: { bg: 'bg-yellow-100 dark:bg-yellow-900', text: 'text-yellow-700 dark:text-yellow-200', dot: 'bg-yellow-500',  icon: 'fa-tools',        label: '\ud6c4\uc791\uc5c5', hex: '#fde68a' },
+        done_pending: { bg: 'bg-red-100 dark:bg-red-900',       text: 'text-red-700 dark:text-red-200',       dot: 'bg-red-400',     icon: 'fa-hourglass-half', label: '\uc644\ub8cc',   hex: '#fca5a5' },
+        completed:    { bg: 'bg-red-100 dark:bg-red-900',       text: 'text-red-700 dark:text-red-200',       dot: 'bg-red-400',     icon: 'fa-check-circle', label: '\ub9c8\uac10\uc644\ub8cc', hex: '#fca5a5' },
+        hold:         { bg: 'bg-gray-200 dark:bg-gray-800',     text: 'text-gray-600 dark:text-gray-300',     dot: 'bg-gray-500',    icon: 'fa-pause-circle', label: '\ubcf4\ub958',     hex: '#d1d5db' }
       };
-      const c = colors[s] || colors.received;
+      const c = colors[displayKey] || colors[s] || colors.received;
       if (pcMode) {
         return '<span class="status-pill-pc group\/sp relative inline-flex items-center justify-center w-6 h-6 rounded-full ' + c.bg + ' cursor-pointer transition-all duration-200 hover:w-auto hover:px-2.5 hover:py-0.5">' +
           '<span class="w-2.5 h-2.5 rounded-full ' + c.dot + ' group-hover\/sp:hidden"></span>' +
@@ -1287,20 +1291,20 @@ function getIndexHTML(): string {
     }
 
     function getProgressColor(p) {
-      if (p === 100) return 'text-green-600 dark:text-green-400';
-      if (p >= 71) return 'text-indigo-600 dark:text-indigo-400';
-      if (p >= 61) return 'text-purple-600 dark:text-purple-400';
+      if (p === 100) return 'text-red-500 dark:text-red-400';
+      if (p >= 71) return 'text-yellow-600 dark:text-yellow-400';
+      if (p >= 61) return 'text-orange-600 dark:text-orange-400';
       if (p >= 31) return 'text-blue-600 dark:text-blue-400';
-      if (p >= 16) return 'text-cyan-600 dark:text-cyan-400';
-      return 'text-gray-500 dark:text-gray-400';
+      if (p >= 16) return 'text-green-600 dark:text-green-400';
+      return 'text-violet-500 dark:text-violet-400';
     }
 
     function getProgressLabel(progress) {
       if (progress <= 15) return '\uc218\uc2e0';
       if (progress <= 30) return '\uad6c\uc0c1';
       if (progress <= 60) return '\uc791\uc5c5\uc911';
-      if (progress <= 70) return '\uad00\ubcf4\uace0(\uc644)';
-      if (progress < 100) return '\ud6c4\uc791\uc5c5\uc911';
+      if (progress <= 70) return '\uad00\ubcf4\uace0';
+      if (progress < 100) return '\ud6c4\uc791\uc5c5';
       return '\uc644\ub8cc';
     }
 
@@ -1439,8 +1443,8 @@ function getIndexHTML(): string {
       if (p <= 15) return { thumb: '#c4b5fd', track: '#c4b5fd', label: '\uc218\uc2e0' };
       if (p <= 30) return { thumb: '#86efac', track: '#86efac', label: '\uad6c\uc0c1' };
       if (p <= 60) return { thumb: '#93c5fd', track: '#93c5fd', label: '\uc791\uc5c5\uc911' };
-      if (p <= 70) return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0(\uc644)' };
-      if (p < 100) return { thumb: '#fde68a', track: '#fde68a', label: '\ud6c4\uc791\uc5c5\uc911' };
+      if (p <= 70) return { thumb: '#fdba74', track: '#fdba74', label: '\uad00\ubcf4\uace0' };
+      if (p < 100) return { thumb: '#fde68a', track: '#fde68a', label: '\ud6c4\uc791\uc5c5' };
       return { thumb: '#fca5a5', track: '#fca5a5', label: '\uc644\ub8cc' };  // 100% = 완료 (파스텔 레드)
     }
 
@@ -1500,7 +1504,7 @@ function getIndexHTML(): string {
       if (!wrapper) return;
       var badge = wrapper.querySelector('.status-pill-pc, .inline-flex');
       if (badge) {
-        var tempTodo = { status: newStatus };
+        var tempTodo = { status: newStatus, progress: v };
         var isPc = !!badge.classList.contains('status-pill-pc');
         badge.outerHTML = getStatusBadge(tempTodo, isPc);
       }
@@ -1603,8 +1607,8 @@ function getIndexHTML(): string {
       if (existingMenu) existingMenu.remove();
 
       const statuses = ['received', 'planning', 'working', 'reported', 'post_working', 'hold'];
-      const labels = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0(\uc644)', post_working: '\ud6c4\uc791\uc5c5\uc911', hold: '\ubcf4\ub958' };
-      const colors = { received: 'bg-gray-100 text-gray-700', planning: 'bg-cyan-100 text-cyan-700', working: 'bg-blue-100 text-blue-800', reported: 'bg-purple-100 text-purple-800', post_working: 'bg-indigo-100 text-indigo-700', hold: 'bg-orange-100 text-orange-700' };
+      const labels = { received: '\uc218\uc2e0', planning: '\uad6c\uc0c1', working: '\uc791\uc5c5\uc911', reported: '\uad00\ubcf4\uace0', post_working: '\ud6c4\uc791\uc5c5', hold: '\ubcf4\ub958' };
+      const colors = { received: 'bg-violet-100 text-violet-700', planning: 'bg-green-100 text-green-700', working: 'bg-blue-100 text-blue-700', reported: 'bg-orange-100 text-orange-700', post_working: 'bg-yellow-100 text-yellow-700', hold: 'bg-gray-200 text-gray-600' };
 
       const menu = document.createElement('div');
       menu.id = 'mobileStatusMenu';
@@ -1777,7 +1781,7 @@ function getIndexHTML(): string {
         if (card) card.classList.toggle('card-active', k === type);
       });
       const titleEl = document.getElementById('cardDetailTitle');
-      const titles = { hold: '\ubcf4\ub958 \ud56d\ubaa9', working: '\uc791\uc5c5 \uc911', reported: '\uad00\ubcf4\uace0(\uc644)' };
+      const titles = { hold: '\ubcf4\ub958 \ud56d\ubaa9', working: '\uc791\uc5c5 \uc911', reported: '\uad00\ubcf4\uace0' };
       const icons = { hold: 'fa-pause-circle', working: 'fa-spinner', reported: 'fa-flag-checkered' };
       titleEl.innerHTML = '<i class="fas '+icons[type]+' mr-2 text-mint-500"><\/i>' + titles[type] + ' \ubaa9\ub85d (\ucd5c\uc2e0\uc21c)';
 
